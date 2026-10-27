@@ -776,6 +776,34 @@
       }
 
       try {
+        const gasUrlForSync = typeof getGasWebAppUrl === 'function' ? getGasWebAppUrl() : '';
+        if (gasUrlForSync && !gasUrlForSync.includes('YOUR_DEPLOYMENT_ID')) {
+          const gasRes = await fetch(gasUrlForSync, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'getLiveSheetData', password: currentPassword })
+          });
+          if (!gasRes.ok) throw new Error('HTTP ' + gasRes.status);
+          const result = await gasRes.json();
+          if (result && result.ok && result.rows) {
+            const imgMap = {};
+            RAW_DATA.forEach(r => { if (r.image) imgMap[r.model] = r.image; });
+            result.rows.forEach(r => { if (!r.image && imgMap[r.model]) r.image = imgMap[r.model]; });
+            RAW_DATA = result.rows;
+            if (result.week_header) {
+              W_CURR_LABEL = result.week_header;
+              document.getElementById('week-label').textContent = result.week_header;
+            }
+            if (result.prev_week_header) {
+              W_PREV_LABEL = result.prev_week_header;
+              document.getElementById('prev-week-label').textContent = result.prev_week_header;
+            }
+            document.getElementById('sync-status-label').textContent = '최근 동기화: ' + result.synced_at;
+            renderAll();
+            showToast('구글 시트 실시간 동기화 완료!', `총 ${RAW_DATA.length}개 모델이 GAS 웹앱을 통해 최신화되었습니다.`, '✅');
+            return;
+          }
+        }
         const res = await fetch('/api/sync-sheet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
