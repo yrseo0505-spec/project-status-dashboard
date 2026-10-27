@@ -715,6 +715,7 @@
         document.getElementById('dashboard-root').classList.remove('hidden');
         document.title = '프로젝트 현황판 (Project Status Dashboard)';
         renderAll();
+        syncFromGoogleSheet(true);
       } catch (err) {
         errEl.classList.remove('hidden');
       }
@@ -734,104 +735,263 @@
     }
 
     // --- LIVE SYNC FUNCTIONS ---
-    async function syncFromGoogleSheet() {
+    const GOOGLE_SHEET_ID = '1DJHA-GBPy6PCG7ghXvOBI9YmSq93SDlp-oaOtibVPg0';
+    const GOOGLE_SHEET_GID = '578406134';
+
+    function parseSheetCsvText(csvText) {
+      const rows = [];
+      let row = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < csvText.length; i++) {
+        const ch = csvText[i];
+        const next = csvText[i + 1];
+        if (inQuotes) {
+          if (ch === '"' && next === '"') {
+            cur += '"';
+            i++;
+          } else if (ch === '"') {
+            inQuotes = false;
+          } else {
+            cur += ch;
+          }
+        } else {
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ',') {
+            row.push(cur);
+            cur = '';
+          } else if (ch === '\r' && next === '\n') {
+            row.push(cur);
+            rows.push(row);
+            row = [];
+            cur = '';
+            i++;
+          } else if (ch === '\n' || ch === '\r') {
+            row.push(cur);
+            rows.push(row);
+            row = [];
+            cur = '';
+          } else {
+            cur += ch;
+          }
+        }
+      }
+      if (cur.length > 0 || row.length > 0) {
+        row.push(cur);
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    async function fetchLiveGoogleSheetDirect() {
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=csv&gid=${GOOGLE_SHEET_GID}&_ts=${Date.now()}`;
+      const resp = await fetch(csvUrl, { cache: 'no-store' });
+      if (!resp.ok) throw new Error('Google Sheet HTTP ' + resp.status);
+      const csvText = await resp.text();
+      const values = parseSheetCsvText(csvText);
+      if (!values || values.length < 4) throw new Error('시트 데이터가 비어 있습니다.');
+
+      const imgByModel = {};
+      const imgByNo = {};
+      RAW_DATA.forEach(r => {
+        if (r.image) {
+          imgByModel[r.model] = r.image;
+          const normM = String(r.model || '').replace(/01-(KR|US|VN|EU|JP|CN)$/, '-$1');
+          imgByModel[normM] = r.image;
+          if (r.no) imgByNo[String(r.no)] = r.image;
+        }
+      });
+
+      const weekHeader = ((values[2] && values[2][14]) || '44W (10/26~)').trim();
+      const prevWeekHeader = ((values[2] && values[2][15]) || '43W (10/19~)').trim();
+
+      const rowsOut = [];
+      let currentGroupKey = '';
+      let currentGidNum = 0;
+      let lastStatus = '판매';
+      const groupMeta = {};
+
+      for (let r = 3; r < values.length; r++) {
+        const row = values[r] || [];
+        const seq = String(row[0] || '').trim();
+        const noRaw = String(row[1] || '').trim();
+        const start = String(row[2] || '').trim();
+        const end = String(row[3] || '').trim();
+        const buyer = String(row[4] || '').trim();
+        const project = String(row[5] || '').replace(/\s+/g, ' ').trim();
+        const item = String(row[6] || '').replace(/\s+/g, ' ').trim();
+        const model = String(row[7] || '').trim();
+        let status = String(row[9] || '').trim();
+        const prodDev = String(row[10] || '').replace(/\n+/g, ' / ').trim();
+        const pkgDev = String(row[11] || '').replace(/\n+/g, ' / ').trim();
+        const massProd = String(row[12] || '').replace(/\n+/g, ' / ').trim();
+        const ksfRaw = String(row[13] || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).join('\n');
+        const w44Raw = String(row[14] || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).join('\n');
+        const w43Raw = String(row[15] || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).join('\n');
+
+        if (!buyer && !project && !model) continue;
+        if (status) {
+          lastStatus = status;
+        } else {
+          status = lastStatus;
+        }
+
+        const groupKey = [buyer, project, start, end, status].join('||');
+        if (groupKey !== currentGroupKey) {
+          currentGidNum++;
+          currentGroupKey = groupKey;
+        }
+        const gid = 'G' + currentGidNum;
+        if (!groupMeta[gid]) {
+          groupMeta[gid] = { ksf: '', w44: '', w43: '' };
+        }
+        if (ksfRaw) groupMeta[gid].ksf = ksfRaw;
+        if (w44Raw) groupMeta[gid].w44 = w44Raw;
+        if (w43Raw) groupMeta[gid].w43 = w43Raw;
+
+        const noVal = parseInt(noRaw, 10) || (rowsOut.length + 1);
+        const normModel = model.replace(/01-(KR|US|VN|EU|JP|CN)$/, '-$1');
+        const img = imgByModel[model] || imgByModel[normModel] || (noVal <= 37 ? (imgByNo[String(noVal)] || '') : '');
+
+        rowsOut.push({
+          seq,
+          no: noVal,
+          start,
+          end,
+          buyer,
+          project,
+          item,
+          model,
+          image: img,
+          status,
+          prod_dev: prodDev,
+          pkg_dev: pkgDev,
+          mass_prod: massProd,
+          dev: `제품:${prodDev || '-'} · 패키지:${pkgDev || '-'} · 양산:${massProd || '-'}`,
+          ksf: ksfRaw,
+          w44: w44Raw,
+          w43: w43Raw,
+          group_id: gid
+        });
+      }
+
+      // 동일 그룹(병합 셀) KSF, 44W, 43W 값 채우기
+      rowsOut.forEach(item => {
+        const meta = groupMeta[item.group_id];
+        if (meta) {
+          if (!item.ksf && meta.ksf) item.ksf = meta.ksf;
+          if (!item.w44 && meta.w44) item.w44 = meta.w44;
+          if (!item.w43 && meta.w43) item.w43 = meta.w43;
+        }
+      });
+
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const syncedAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+      return {
+        ok: true,
+        rows: rowsOut,
+        week_header: weekHeader,
+        prev_week_header: prevWeekHeader,
+        synced_at: syncedAt
+      };
+    }
+    function applySyncedResult(result, silent, sourceLabel) {
+      if (!result || !result.ok || !result.rows) return false;
+      const imgMap = {};
+      const imgByNo = {};
+      RAW_DATA.forEach(r => {
+        if (r.image) {
+          imgMap[r.model] = r.image;
+          const normM = String(r.model || '').replace(/01-(KR|US|VN|EU|JP|CN)$/, '-$1');
+          imgMap[normM] = r.image;
+          if (r.no) imgByNo[String(r.no)] = r.image;
+        }
+      });
+      result.rows.forEach(r => {
+        if (!r.image) {
+          const normM = String(r.model || '').replace(/01-(KR|US|VN|EU|JP|CN)$/, '-$1');
+          r.image = imgMap[r.model] || imgMap[normM] || (r.no <= 37 ? (imgByNo[String(r.no)] || '') : '');
+        }
+      });
+      RAW_DATA = result.rows;
+      if (result.week_header) {
+        W_CURR_LABEL = result.week_header;
+        document.getElementById('week-label').textContent = result.week_header;
+      }
+      if (result.prev_week_header) {
+        W_PREV_LABEL = result.prev_week_header;
+        document.getElementById('prev-week-label').textContent = result.prev_week_header;
+      }
+      if (result.synced_at) {
+        document.getElementById('sync-status-label').textContent = '최근 동기화: ' + result.synced_at;
+      }
+      renderAll();
+      if (!silent) {
+        showToast('구글 시트 실시간 동기화 완료!', `총 ${RAW_DATA.length}개 모델이 원본 구글 시트(${sourceLabel})에서 즉시 반영되었습니다.`, '✅');
+      }
+      return true;
+    }
+
+    async function syncFromGoogleSheet(silent = false) {
       const btn = document.getElementById('sync-sheet-btn');
       const icon = document.getElementById('sync-icon');
-      btn.disabled = true;
-      icon.classList.add('animate-spin');
-      showToast('구글 시트 동기화 중...', '원본 구글 스프레드시트(프로젝트 현황)에서 최신 데이터와 이미지를 불러오고 있습니다.', '🔄');
+      if (btn) btn.disabled = true;
+      if (icon) icon.classList.add('animate-spin');
+      if (!silent) {
+        showToast('구글 시트 동기화 중...', '원본 구글 스프레드시트(프로젝트 현황)에서 최신 데이터를 불러오고 있습니다.', '🔄');
+      }
 
+      // 1. GAS 웹앱 iframe 내부 실행 시
       if (window.google && google.script && google.script.run) {
         google.script.run
           .withSuccessHandler(function(result) {
-            btn.disabled = false;
-            icon.classList.remove('animate-spin');
-            if (result && result.ok && result.rows) {
-              const imgMap = {};
-              RAW_DATA.forEach(r => { if (r.image) imgMap[r.model] = r.image; });
-              result.rows.forEach(r => { if (!r.image && imgMap[r.model]) r.image = imgMap[r.model]; });
-              RAW_DATA = result.rows;
-              if (result.week_header) {
-                W_CURR_LABEL = result.week_header;
-                document.getElementById('week-label').textContent = result.week_header;
-              }
-              if (result.prev_week_header) {
-                W_PREV_LABEL = result.prev_week_header;
-                document.getElementById('prev-week-label').textContent = result.prev_week_header;
-              }
-              document.getElementById('sync-status-label').textContent = '최근 동기화: ' + result.synced_at;
-              renderAll();
-              showToast('구글 시트 실시간 동기화 완료!', `총 ${RAW_DATA.length}개 모델이 원본 구글 시트에서 즉시 반영되었습니다.`, '✅');
-            } else {
-              showToast('동기화 실패', (result && result.error) || '권한 또는 시트 확인 필요', '⚠️');
+            if (btn) btn.disabled = false;
+            if (icon) icon.classList.remove('animate-spin');
+            if (!applySyncedResult(result, silent, 'Apps Script')) {
+              if (!silent) showToast('동기화 실패', (result && result.error) || '권한 또는 시트 확인 필요', '⚠️');
             }
           })
           .withFailureHandler(function(err) {
-            btn.disabled = false;
-            icon.classList.remove('animate-spin');
-            showToast('동기화 오류', String(err), '⚠️');
+            if (btn) btn.disabled = false;
+            if (icon) icon.classList.remove('animate-spin');
+            if (!silent) showToast('동기화 오류', String(err), '⚠️');
           })
           .getLiveSheetData(currentPassword);
         return;
       }
 
       try {
+        // 2. GAS 웹앱 URL이 설정되어 있으면 우선 시도
         const gasUrlForSync = typeof getGasWebAppUrl === 'function' ? getGasWebAppUrl() : '';
         if (gasUrlForSync && !gasUrlForSync.includes('YOUR_DEPLOYMENT_ID')) {
-          const gasRes = await fetch(gasUrlForSync, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'getLiveSheetData', password: currentPassword })
-          });
-          if (!gasRes.ok) throw new Error('HTTP ' + gasRes.status);
-          const result = await gasRes.json();
-          if (result && result.ok && result.rows) {
-            const imgMap = {};
-            RAW_DATA.forEach(r => { if (r.image) imgMap[r.model] = r.image; });
-            result.rows.forEach(r => { if (!r.image && imgMap[r.model]) r.image = imgMap[r.model]; });
-            RAW_DATA = result.rows;
-            if (result.week_header) {
-              W_CURR_LABEL = result.week_header;
-              document.getElementById('week-label').textContent = result.week_header;
+          try {
+            const gasRes = await fetch(gasUrlForSync, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ action: 'getLiveSheetData', password: currentPassword })
+            });
+            if (gasRes.ok) {
+              const gasResult = await gasRes.json();
+              if (applySyncedResult(gasResult, silent, 'GAS 웹앱')) return;
             }
-            if (result.prev_week_header) {
-              W_PREV_LABEL = result.prev_week_header;
-              document.getElementById('prev-week-label').textContent = result.prev_week_header;
-            }
-            document.getElementById('sync-status-label').textContent = '최근 동기화: ' + result.synced_at;
-            renderAll();
-            showToast('구글 시트 실시간 동기화 완료!', `총 ${RAW_DATA.length}개 모델이 GAS 웹앱을 통해 최신화되었습니다.`, '✅');
-            return;
-          }
+          } catch (_) {}
         }
-        const res = await fetch('/api/sync-sheet', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: currentPassword })
-        });
-        if (!res.ok) throw new Error('Server returned ' + res.status);
-        const result = await res.json();
-        if (result.ok && result.rows) {
-          RAW_DATA = result.rows;
-          if (result.week_header) {
-            W_CURR_LABEL = result.week_header;
-            document.getElementById('week-label').textContent = result.week_header;
-          }
-          if (result.prev_week_header) {
-            W_PREV_LABEL = result.prev_week_header;
-            document.getElementById('prev-week-label').textContent = result.prev_week_header;
-          }
-          document.getElementById('sync-status-label').textContent = '최근 동기화: ' + result.synced_at;
-          renderAll();
-          showToast('구글 시트 동기화 완료!', `총 ${RAW_DATA.length}개 모델이 사내 웹 서버, R:\공용드라이브, 구글드라이브에 모두 최신화되었습니다.`, '✅');
-        } else {
-          throw new Error(result.error || '동기화 실패');
+
+        // 3. 웹 대시보드(GitHub Pages 등)에서 원본 구글 시트 직접 실시간 조회
+        const directResult = await fetchLiveGoogleSheetDirect();
+        if (applySyncedResult(directResult, silent, '실시간 웹 연동')) {
+          return;
         }
       } catch (err) {
-        showToast('사내 웹 서버(http://10.1.4.51:8080)에서 실행해 주세요', '파일 직접 열기(file://) 모드에서는 로컬 스토리지에 임시 반영됩니다. 전체 서버 파일 동기화는 http://10.1.4.51:8080 에서 가능합니다.', '⚠️');
+        if (!silent) {
+          showToast('구글 시트 동기화 오류', '시트 데이터를 불러오는 중 오류가 발생했습니다: ' + (err.message || err), '⚠️');
+        }
       } finally {
-        btn.disabled = false;
-        icon.classList.remove('animate-spin');
+        if (btn) btn.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
       }
     }
 
@@ -1842,6 +2002,7 @@
             document.getElementById('dashboard-root').classList.remove('hidden');
             document.title = '프로젝트 현황판 (Project Status Dashboard)';
             renderAll();
+            syncFromGoogleSheet(true);
           }
         }
       } catch (_) {}
