@@ -198,6 +198,30 @@
     <!-- Dynamic KPI Summary Cards -->
     <section id="kpi-section" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3"></section>
 
+    <!-- Visual Analytics Charts Section (Stage Progress & Step-by-Step R&R) -->
+    <section id="charts-section" class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 shadow-sm space-y-4 animate-fade">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="px-2.5 py-0.5 rounded-md bg-blue-500/15 text-blue-600 dark:text-blue-400 text-xs font-bold">시각화 분석 리포트</span>
+          <h2 class="text-sm font-bold text-[var(--foreground)]">제품 단계별 진행 현황 &amp; 개발·패키지·양산 단계별 R&amp;R 분포</h2>
+          <span class="text-xs text-[var(--muted-foreground)] hidden md:inline">· 차트 항목을 클릭하면 하단 목록이 즉시 필터링됩니다</span>
+        </div>
+        <div class="flex items-center gap-2 self-end sm:self-auto">
+          <div class="inline-flex rounded-lg bg-[var(--background)] p-0.5 border border-[var(--border)] text-xs">
+            <button type="button" id="chart-unit-sku" onclick="setChartUnit('sku')" class="px-2.5 py-1 rounded-md font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] transition-all">
+              모델(SKU) 기준
+            </button>
+            <button type="button" id="chart-unit-group" onclick="setChartUnit('group')" class="px-2.5 py-1 rounded-md font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-all">
+              프로젝트 그룹 기준
+            </button>
+          </div>
+          <button type="button" onclick="toggleChartsSection()" id="charts-toggle-btn" class="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] ml-1 whitespace-nowrap">접기 ▲</button>
+        </div>
+      </div>
+
+      <div id="charts-body" class="grid grid-cols-1 xl:grid-cols-12 gap-5"></div>
+    </section>
+
     <!-- Weekly Key Action & Issue Highlight Banner -->
     <section class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 shadow-sm">
       <div class="flex items-center justify-between mb-3">
@@ -1227,14 +1251,16 @@
     }
 
     function filterByBuyer(buyer) {
-      selectedBuyer = buyer;
+      selectedBuyer = (selectedBuyer === buyer) ? 'ALL' : buyer;
       renderFilters();
+      renderVisualCharts();
       render();
     }
 
     function filterByStatus(status) {
-      selectedStatus = status;
+      selectedStatus = (selectedStatus === status && status !== 'ALL') ? 'ALL' : status;
       renderFilters();
+      renderVisualCharts();
       render();
     }
 
@@ -1243,7 +1269,10 @@
       document.getElementById('only-w43').checked = false;
       selectedBuyer = 'ALL';
       selectedStatus = 'ALL';
+      selectedRnRRole = 'ALL';
+      selectedRnROwner = 'ALL';
       renderFilters();
+      renderVisualCharts();
       render();
     }
 
@@ -1264,6 +1293,11 @@
       return RAW_DATA.filter(r => {
         if (selectedBuyer !== 'ALL' && r.buyer !== selectedBuyer) return false;
         if (selectedStatus !== 'ALL' && r.status !== selectedStatus) return false;
+        if (selectedRnRRole !== 'ALL' && selectedRnROwner !== 'ALL') {
+          const rawVal = String(r[selectedRnRRole] || '').trim();
+          const normVal = (!rawVal || rawVal === '-') ? '미정(-)' : rawVal;
+          if (normVal !== selectedRnROwner) return false;
+        }
         if (onlyWeekly && !hasWeeklyUpdate(r)) return false;
         if (q) {
           const hay = [r.buyer, r.project, r.item, r.model, r.status, r.prod_dev, r.pkg_dev, r.mass_prod, r.ksf, r.w44, r.w43, r.start, r.end].join(' ').toLowerCase();
@@ -1736,8 +1770,387 @@
       }
     }
 
+    let chartUnit = 'sku'; // 'sku' or 'group'
+    let selectedRnRRole = 'ALL'; // 'ALL' | 'prod_dev' | 'pkg_dev' | 'mass_prod'
+    let selectedRnROwner = 'ALL';
+
+    function toggleChartsSection() {
+      const body = document.getElementById('charts-body');
+      const btn = document.getElementById('charts-toggle-btn');
+      if (!body || !btn) return;
+      if (body.classList.contains('hidden')) {
+        body.classList.remove('hidden');
+        btn.textContent = '접기 ▲';
+      } else {
+        body.classList.add('hidden');
+        btn.textContent = '펼치기 ▼';
+      }
+    }
+
+    function setChartUnit(unit) {
+      chartUnit = unit;
+      const skuBtn = document.getElementById('chart-unit-sku');
+      const grpBtn = document.getElementById('chart-unit-group');
+      if (skuBtn && grpBtn) {
+        if (unit === 'sku') {
+          skuBtn.className = 'px-2.5 py-1 rounded-md font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] transition-all';
+          grpBtn.className = 'px-2.5 py-1 rounded-md font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-all';
+        } else {
+          grpBtn.className = 'px-2.5 py-1 rounded-md font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] transition-all';
+          skuBtn.className = 'px-2.5 py-1 rounded-md font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-all';
+        }
+      }
+      renderVisualCharts();
+    }
+
+    function filterByRnR(roleField, ownerValue, statusOpt) {
+      const searchEl = document.getElementById('search-input');
+      if (statusOpt) {
+        selectedStatus = (selectedStatus === statusOpt && selectedRnROwner === ownerValue) ? 'ALL' : statusOpt;
+      }
+      if (selectedRnRRole === roleField && selectedRnROwner === ownerValue && !statusOpt) {
+        selectedRnRRole = 'ALL';
+        selectedRnROwner = 'ALL';
+        if (searchEl) searchEl.value = '';
+        showToast('R&R 필터 해제', '전체 프로젝트 및 모델을 표시합니다.', 'ℹ️');
+      } else {
+        selectedRnRRole = roleField;
+        selectedRnROwner = ownerValue;
+        const roleLabel = roleField === 'prod_dev' ? '제품개발' : (roleField === 'pkg_dev' ? '패키지개발' : '양산');
+        showToast('R&R 필터 적용', `${statusOpt ? '[' + statusOpt + ' 단계] ' : ''}${roleLabel} 담당: '${ownerValue}' 조건으로 필터링되었습니다.`, '🔍');
+      }
+      renderFilters();
+      renderVisualCharts();
+      render();
+    }
+
+    function renderVisualCharts() {
+      const container = document.getElementById('charts-body');
+      if (!container) return;
+
+      const allGroups = groupRows(RAW_DATA);
+      const items = chartUnit === 'group' ? allGroups : RAW_DATA;
+      const totalCount = items.length || 1;
+      const unitLabel = chartUnit === 'group' ? '그룹' : '모델';
+
+      // 1) 제품 단계별 진행 현황 데이터 집계 (컨셉 -> 디자인 -> 개발 -> 판매)
+      const stageMeta = [
+        { key: '컨셉', label: '컨셉 (Concept)', color: '#a855f7', bgCls: 'bg-purple-500', textCls: 'text-purple-600 dark:text-purple-400', softCls: 'bg-purple-500/10 border-purple-500/30' },
+        { key: '디자인', label: '디자인 (Design)', color: '#f59e0b', bgCls: 'bg-amber-500', textCls: 'text-amber-600 dark:text-amber-400', softCls: 'bg-amber-500/10 border-amber-500/30' },
+        { key: '개발', label: '개발 (Dev)', color: '#3b82f6', bgCls: 'bg-blue-500', textCls: 'text-blue-600 dark:text-blue-400', softCls: 'bg-blue-500/10 border-blue-500/30' },
+        { key: '판매', label: '판매 (Sales)', color: '#10b981', bgCls: 'bg-emerald-500', textCls: 'text-emerald-600 dark:text-emerald-400', softCls: 'bg-emerald-500/10 border-emerald-500/30' }
+      ];
+
+      const stageSkuCounts = { '컨셉': 0, '디자인': 0, '개발': 0, '판매': 0 };
+      const stageGroupCounts = { '컨셉': 0, '디자인': 0, '개발': 0, '판매': 0 };
+      RAW_DATA.forEach(r => { stageSkuCounts[r.status] = (stageSkuCounts[r.status] || 0) + 1; });
+      allGroups.forEach(g => { stageGroupCounts[g.status] = (stageGroupCounts[g.status] || 0) + 1; });
+
+      const activeStageCounts = chartUnit === 'group' ? stageGroupCounts : stageSkuCounts;
+
+      // SVG Donut Chart 계산 (r=52, circumference=2*pi*52 ≈ 326.726)
+      const radius = 52;
+      const circum = 2 * Math.PI * radius;
+      let offsetAcc = 0;
+      const donutSegments = stageMeta.map(st => {
+        const cnt = activeStageCounts[st.key] || 0;
+        const frac = cnt / totalCount;
+        const dash = frac * circum;
+        const seg = `
+          <circle
+            cx="70" cy="70" r="${radius}"
+            fill="transparent"
+            stroke="${st.color}"
+            stroke-width="18"
+            stroke-dasharray="${dash.toFixed(2)} ${(circum - dash).toFixed(2)}"
+            stroke-dashoffset="${(-offsetAcc).toFixed(2)}"
+            class="cursor-pointer transition-all duration-300 hover:opacity-80"
+            onclick="filterByStatus('${st.key}')"
+          >
+            <title>${st.label}: ${cnt}${unitLabel} (${(frac * 100).toFixed(1)}%)</title>
+          </circle>
+        `;
+        offsetAcc += dash;
+        return seg;
+      }).join('');
+
+      // 바이어별 단계 분포 (Stacked Horizontal Bar)
+      const buyerStageMap = {};
+      items.forEach(it => {
+        const b = it.buyer || '기타';
+        if (!buyerStageMap[b]) {
+          buyerStageMap[b] = { total: 0, '컨셉': 0, '디자인': 0, '개발': 0, '판매': 0 };
+        }
+        buyerStageMap[b].total++;
+        buyerStageMap[b][it.status] = (buyerStageMap[b][it.status] || 0) + 1;
+      });
+      const buyersSorted = Object.entries(buyerStageMap).sort((a, b) => b[1].total - a[1].total);
+
+      // 2) R&R (제품개발 / 패키지개발 / 양산) 데이터 집계
+      const ownerColorMap = {
+        'APD-G': { bar: 'bg-blue-500', badge: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30', hex: '#3b82f6' },
+        'B2C사업팀': { bar: 'bg-indigo-500', badge: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30', hex: '#6366f1' },
+        'BJ(안산)': { bar: 'bg-emerald-500', badge: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30', hex: '#10b981' },
+        '외주': { bar: 'bg-amber-500', badge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30', hex: '#f59e0b' },
+        '완료': { bar: 'bg-teal-500', badge: 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30', hex: '#14b8a6' },
+        '미정(-)': { bar: 'bg-slate-400', badge: 'bg-slate-500/15 text-slate-500 dark:text-slate-400 border-slate-500/30', hex: '#94a3b8' }
+      };
+      const getOwnerStyle = (owner) => ownerColorMap[owner] || { bar: 'bg-purple-500', badge: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30', hex: '#a855f7' };
+      const normalizeOwner = (val) => {
+        const v = String(val || '').trim();
+        return (!v || v === '-') ? '미정(-)' : v;
+      };
+
+      const roleCategories = [
+        { field: 'prod_dev', title: '🔧 제품개발 (Product Dev)', desc: '기구·회로·음향 설계 주체' },
+        { field: 'pkg_dev', title: '📦 패키지개발 (Package Dev)', desc: '패키지 사양·인쇄·디자인 주체' },
+        { field: 'mass_prod', title: '🏭 양산 (Mass Production)', desc: '제조·조립·품질관리 주체' }
+      ];
+
+      const roleDistributionHtml = roleCategories.map(rc => {
+        const counts = {};
+        items.forEach(it => {
+          const k = normalizeOwner(it[rc.field]);
+          counts[k] = (counts[k] || 0) + 1;
+        });
+        const sortedOwners = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+        // 상단 누적 스택 바
+        const stackedBar = sortedOwners.map(([owner, cnt]) => {
+          const pct = (cnt / totalCount * 100).toFixed(1);
+          const st = getOwnerStyle(owner);
+          return `<div style="width:${pct}%" class="${st.bar} h-full first:rounded-l-full last:rounded-r-full transition-all" title="${escapeHtml(owner)}: ${cnt}${unitLabel} (${pct}%)"></div>`;
+        }).join('');
+
+        const rowsHtml = sortedOwners.map(([owner, cnt]) => {
+          const pct = (cnt / totalCount * 100).toFixed(1);
+          const st = getOwnerStyle(owner);
+          const isSelected = selectedRnRRole === rc.field && selectedRnROwner === owner;
+          const activeRing = isSelected ? 'ring-2 ring-blue-500 bg-blue-500/5' : 'hover:bg-[var(--card)]';
+          return `
+            <div onclick="filterByRnR('${rc.field}', '${escapeHtml(owner)}')" class="cursor-pointer p-1.5 rounded-lg transition-all ${activeRing}">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="inline-flex items-center gap-1.5 font-semibold text-[var(--foreground)]">
+                  <span class="w-2 h-2 rounded-full ${st.bar}"></span>
+                  ${escapeHtml(owner)}
+                </span>
+                <span class="font-mono text-[var(--muted-foreground)]"><b class="text-[var(--foreground)]">${cnt}</b>${unitLabel} (${pct}%)</span>
+              </div>
+              <div class="w-full bg-[var(--border)] h-1.5 rounded-full overflow-hidden">
+                <div class="${st.bar} h-full rounded-full transition-all duration-500" style="width: ${pct}%"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="p-3.5 rounded-xl bg-[var(--background)] border border-[var(--border)] flex flex-col justify-between space-y-3">
+            <div>
+              <div class="flex items-center justify-between">
+                <h4 class="text-xs font-bold text-[var(--foreground)]">${rc.title}</h4>
+                <span class="text-[11px] text-[var(--muted-foreground)]">총 ${items.length}${unitLabel}</span>
+              </div>
+              <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5">${rc.desc}</p>
+              <div class="mt-2.5 w-full h-2.5 rounded-full bg-[var(--border)] overflow-hidden flex gap-0.5 p-0.5">
+                ${stackedBar}
+              </div>
+            </div>
+            <div class="space-y-1.5 pt-1">
+              ${rowsHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // 단계별(컨셉/디자인/개발/판매) x R&R(제품개발 & 양산) 매트릭스 차트
+      const stageRnRMatrixHtml = stageMeta.map(st => {
+        const stageItems = items.filter(it => it.status === st.key);
+        const stageTotal = stageItems.length;
+        const prodMap = {};
+        const massMap = {};
+        stageItems.forEach(it => {
+          const p = normalizeOwner(it.prod_dev);
+          const m = normalizeOwner(it.mass_prod);
+          prodMap[p] = (prodMap[p] || 0) + 1;
+          massMap[m] = (massMap[m] || 0) + 1;
+        });
+
+        const renderPills = (mapObj, roleField) => {
+          if (stageTotal === 0) return '<span class="text-[11px] text-[var(--muted-foreground)]">-</span>';
+          return Object.entries(mapObj).sort((a, b) => b[1] - a[1]).map(([owner, cnt]) => {
+            const sty = getOwnerStyle(owner);
+            const pct = Math.round(cnt / stageTotal * 100);
+            return `
+              <button
+                type="button"
+                onclick="filterByRnR('${roleField}', '${escapeHtml(owner)}', '${st.key}')"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${sty.badge} hover:scale-105 transition-transform"
+                title="클릭하여 [${st.key}] 단계의 ${owner} 담당 건만 필터링"
+              >
+                <span>${escapeHtml(owner)}</span>
+                <span class="font-mono opacity-90">${cnt} (${pct}%)</span>
+              </button>
+            `;
+          }).join('');
+        };
+
+        return `
+          <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)] space-y-2">
+            <div class="flex items-center justify-between border-b border-[var(--border)] pb-1.5">
+              <button type="button" onclick="filterByStatus('${st.key}')" class="inline-flex items-center gap-1.5 text-xs font-bold ${st.textCls} hover:underline">
+                <span class="w-2 h-2 rounded-full ${st.bgCls}"></span>
+                ${st.label}
+              </button>
+              <span class="text-xs font-mono font-semibold text-[var(--muted-foreground)]">${stageTotal}${unitLabel}</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div class="space-y-1">
+                <div class="text-[11px] font-semibold text-[var(--muted-foreground)]">🔧 제품개발 주체</div>
+                <div class="flex flex-wrap gap-1">${renderPills(prodMap, 'prod_dev')}</div>
+              </div>
+              <div class="space-y-1">
+                <div class="text-[11px] font-semibold text-[var(--muted-foreground)]">🏭 양산 주체</div>
+                <div class="flex flex-wrap gap-1">${renderPills(massMap, 'mass_prod')}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.innerHTML = `
+        <!-- Left Column (5 cols): 1. 제품 단계별 진행 현황 -->
+        <div class="xl:col-span-5 flex flex-col justify-between gap-4 p-4 rounded-2xl bg-[var(--background)]/60 border border-[var(--border)]">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-xs font-bold text-[var(--foreground)] flex items-center gap-1.5">
+                  <span>📈 1. 제품 단계별 진행 현황 (Stage Pipeline)</span>
+                </h3>
+                <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5">컨셉 → 디자인 → 개발 → 판매 단계별 포트폴리오 비중</p>
+              </div>
+              ${selectedStatus !== 'ALL' ? `
+                <button onclick="filterByStatus('ALL')" class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-semibold hover:underline">
+                  필터 해제 (${escapeHtml(selectedStatus)}) ✕
+                </button>
+              ` : ''}
+            </div>
+
+            <!-- Donut Chart + Pipeline Bars -->
+            <div class="flex flex-col sm:flex-row items-center gap-4 pt-1">
+              <div class="relative w-[140px] h-[140px] shrink-0 flex items-center justify-center">
+                <svg class="w-full h-full -rotate-90" viewBox="0 0 140 140">
+                  <circle cx="70" cy="70" r="${radius}" fill="transparent" stroke="currentColor" stroke-width="18" class="text-[var(--border)]" />
+                  ${donutSegments}
+                </svg>
+                <div onclick="filterByStatus('ALL')" class="cursor-pointer absolute inset-0 flex flex-col items-center justify-center text-center">
+                  <span class="text-[10px] font-semibold text-[var(--muted-foreground)]">전체 ${unitLabel}</span>
+                  <span class="text-xl font-extrabold text-[var(--foreground)] leading-tight">${totalCount}</span>
+                  <span class="text-[10px] text-[var(--muted-foreground)]">${allGroups.length}그룹 / ${RAW_DATA.length}SKU</span>
+                </div>
+              </div>
+
+              <!-- Stage Pipeline Progress Bars -->
+              <div class="flex-1 w-full space-y-2">
+                ${stageMeta.map(st => {
+                  const skuCnt = stageSkuCounts[st.key] || 0;
+                  const grpCnt = stageGroupCounts[st.key] || 0;
+                  const val = activeStageCounts[st.key] || 0;
+                  const pct = (val / totalCount * 100).toFixed(1);
+                  const isSel = selectedStatus === st.key;
+                  return `
+                    <div onclick="filterByStatus('${st.key}')" class="cursor-pointer p-2 rounded-xl border transition-all ${isSel ? st.softCls + ' ring-1 ring-current' : 'bg-[var(--card)] border-[var(--border)] hover:border-blue-500/40'}">
+                      <div class="flex items-center justify-between text-xs mb-1">
+                        <span class="font-bold ${st.textCls} flex items-center gap-1.5">
+                          <span class="w-2 h-2 rounded-full ${st.bgCls}"></span>
+                          ${st.label}
+                        </span>
+                        <span class="font-mono text-xs">
+                          <b class="text-[var(--foreground)]">${skuCnt}</b>모델 · <b class="text-[var(--foreground)]">${grpCnt}</b>그룹
+                          <span class="text-[var(--muted-foreground)] ml-1">(${pct}%)</span>
+                        </span>
+                      </div>
+                      <div class="w-full bg-[var(--border)] h-2 rounded-full overflow-hidden">
+                        <div class="${st.bgCls} h-full rounded-full transition-all duration-500" style="width: ${pct}%"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+
+          <!-- 바이어별 단계 누적 바 차트 -->
+          <div class="pt-3 border-t border-[var(--border)] space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-[var(--foreground)]">🏢 바이어별 제품 단계 구성 (${unitLabel} 기준)</span>
+              <div class="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+                ${stageMeta.map(st => `<span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full ${st.bgCls}"></span>${st.key}</span>`).join('')}
+              </div>
+            </div>
+            <div class="space-y-1.5">
+              ${buyersSorted.map(([buyer, info]) => {
+                const isBuyerSel = selectedBuyer === buyer;
+                return `
+                  <div onclick="filterByBuyer('${escapeHtml(buyer)}')" class="cursor-pointer flex items-center gap-2.5 p-1.5 rounded-lg transition-colors ${isBuyerSel ? 'bg-blue-500/10 ring-1 ring-blue-500/40' : 'hover:bg-[var(--card)]'}">
+                    <div class="w-16 shrink-0 flex items-center justify-between">
+                      ${buyerBadge(buyer)}
+                    </div>
+                    <div class="flex-1 h-3 rounded-full bg-[var(--border)] overflow-hidden flex">
+                      ${stageMeta.map(st => {
+                        const c = info[st.key] || 0;
+                        if (!c) return '';
+                        const w = (c / info.total * 100).toFixed(1);
+                        return `<div style="width:${w}%" class="${st.bgCls} h-full" title="${escapeHtml(buyer)} - ${st.key}: ${c}${unitLabel}"></div>`;
+                      }).join('')}
+                    </div>
+                    <div class="w-20 text-right font-mono text-xs text-[var(--muted-foreground)] shrink-0">
+                      <b class="text-[var(--foreground)]">${info.total}</b>${unitLabel} (${Math.round(info.total / totalCount * 100)}%)
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column (7 cols): 2. 제품개발 / 패키지개발 / 양산 단계별 R&R -->
+        <div class="xl:col-span-7 flex flex-col justify-between gap-4 p-4 rounded-2xl bg-[var(--background)]/60 border border-[var(--border)]">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 class="text-xs font-bold text-[var(--foreground)]">🛠️ 2. 제품개발 · 패키지개발 · 양산 단계별 R&amp;R 현황</h3>
+                <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5">부문별 담당 조직(APD-G · B2C사업팀 · BJ안산 · 외주) 워크로드 및 단계별 역할 분담</p>
+              </div>
+              ${selectedRnROwner !== 'ALL' ? `
+                <button onclick="filterByRnR('${selectedRnRRole}', '${escapeHtml(selectedRnROwner)}')" class="px-2.5 py-1 rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-400 text-xs font-bold hover:underline">
+                  R&amp;R 필터 해제: ${escapeHtml(selectedRnROwner)} ✕
+                </button>
+              ` : ''}
+            </div>
+
+            <!-- 3대 영역(제품개발 / 패키지개발 / 양산) 막대 그래프 카드 -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              ${roleDistributionHtml}
+            </div>
+          </div>
+
+          <!-- 진행 단계별(컨셉/디자인/개발/판매) R&R 교차 매트릭스 -->
+          <div class="pt-3 border-t border-[var(--border)] space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-[var(--foreground)]">🔄 제품 단계별 × R&amp;R (제품개발 · 양산) 세부 매트릭스</span>
+              <span class="text-[11px] text-[var(--muted-foreground)]">패키지개발 전 단계: <b class="text-[var(--foreground)]">B2C사업팀 (100%)</b> 전담</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              ${stageRnRMatrixHtml}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderAll() {
       renderKPIsAndBanner();
+      renderVisualCharts();
       populateGasFormDatalists();
       renderFilters();
       render();
