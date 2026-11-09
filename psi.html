@@ -2131,11 +2131,29 @@
         }
       }
 
-      const futureSalesSum = sales.slice(2).reduce((a, b) => a + b, 0);
-      const avgWeeklySales = futureSalesSum / 7;
-      const wosCurrent01 = avgWeeklySales > 0 ? (entry.inv01Current / avgWeeklySales) : 99;
+      // 1) 최근 3주(과거 2주: 44w, 45w + 현재: 46w) 기준 평균 주간 판매수량
+      const recent3WeeksSalesSum = (sales[0] || 0) + (sales[1] || 0) + (sales[2] || 0);
+      const avgWeeklySales3W = recent3WeeksSalesSum / 3;
+      const avgWeeklySales = avgWeeklySales3W; // 최근 3주 평균을 기본 주평균 판매량으로 사용
+
+      // 2) I_01, I_02 재고를 감안한 예상 소진 주차수 (Weeks of Supply) 및 예상 소진 시점(주차)
+      const wosI01 = avgWeeklySales3W > 0 ? (entry.inv01Current / avgWeeklySales3W) : 99;
+      const wosI02 = avgWeeklySales3W > 0 ? (entry.inv02Current / avgWeeklySales3W) : 99;
       const totalCombinedStock = entry.inv01Current + entry.inv02Current;
-      const totalWos = avgWeeklySales > 0 ? (totalCombinedStock / avgWeeklySales) : 99;
+      const totalWos = avgWeeklySales3W > 0 ? (totalCombinedStock / avgWeeklySales3W) : 99;
+      const wosCurrent01 = wosI01;
+
+      const currWeekNum = (PSI_WEEKS[2] ? PSI_WEEKS[2].weekNum : 46);
+      const formatDepletionWeek = (wosVal) => {
+        if (! isFinite(wosVal) || wosVal >= 99) return '소진 없음';
+        const targetW = currWeekNum + Math.floor(wosVal);
+        if (targetW <= 52) return `26년 ${targetW}w경`;
+        const yrOffset = Math.floor((targetW - 1) / 52);
+        const remW = ((targetW - 1) % 52) + 1;
+        return `${26 + yrOffset}년 ${remW}w경`;
+      };
+      const i01DepletionLabel = formatDepletionWeek(wosI01);
+      const totalDepletionLabel = formatDepletionWeek(totalWos);
 
       // 현재(46w) 및 미래(47w~52w) 과부족 체크
       const minFutureI01Diff = Math.min(...i01Diff.slice(2));
@@ -2186,9 +2204,16 @@
         inv01WeekStatus,
         inv02WeekStatus,
         inv02ProdSchedule,
+        recent3WeeksSalesSum,
+        avgWeeklySales3W,
         avgWeeklySales,
+        wosI01,
+        wosI02,
         wosCurrent01,
+        totalCombinedStock,
         totalWos,
+        i01DepletionLabel,
+        totalDepletionLabel,
         hasI01Shortage,
         hasI02Shortage,
         currI01Diff,
@@ -2558,7 +2583,7 @@
               <span class="text-xl font-extrabold text-[var(--foreground)]">${counts.ALL}</span>
               <span class="text-[11px] text-[var(--muted-foreground)]">개 단품</span>
             </div>
-            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">주평균 판매합계 <b class="text-[var(--foreground)]">${sumWeeklySales.toLocaleString()}</b>개</div>
+            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">최근 3주 평균 판매합계 <b class="text-[var(--foreground)]">${sumWeeklySales.toLocaleString()}</b>개/주</div>
           </div>
 
           <div onclick="setPsiStatusFilter('I01_SHORT')" class="cursor-pointer p-3 rounded-xl border transition-all ${psiStatusFilter === 'I01_SHORT' ? 'border-amber-500 bg-amber-500/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-amber-500/40'}">
@@ -2706,6 +2731,26 @@
                               <div class="text-[9px] font-mono text-purple-500 mt-0.5">수기 입력값 고정 관리</div>
                             </div>
                           </div>
+
+                          <!-- 최근 3주 평균 주간 판매수량 및 I_01 / I_02 예상 소진 주차수 명기 -->
+                          <div class="p-2 rounded-xl bg-[var(--background)] border border-[var(--border)] space-y-1 text-[10px] leading-snug">
+                            <div class="flex items-center justify-between">
+                              <span class="text-[var(--muted-foreground)] font-semibold">📊 최근 3주 평균 판매:</span>
+                              <span class="font-mono font-extrabold text-[var(--foreground)]">${calc.avgWeeklySales3W.toFixed(1)}개/주</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                              <span class="text-blue-600 dark:text-blue-400 font-semibold">· I_01 예상 소진:</span>
+                              <span class="font-mono font-bold text-blue-600 dark:text-blue-400">${calc.wosI01.toFixed(1)}주 <span class="text-[9px] font-normal text-[var(--muted-foreground)]">(${calc.i01DepletionLabel})</span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                              <span class="text-purple-600 dark:text-purple-400 font-semibold">· I_02 단독 소진:</span>
+                              <span class="font-mono font-bold text-purple-600 dark:text-purple-400">${calc.wosI02.toFixed(1)}주</span>
+                            </div>
+                            <div class="flex items-center justify-between pt-0.5 border-t border-[var(--border)]">
+                              <span class="text-emerald-600 dark:text-emerald-400 font-bold">· I_01+I_02 통합 소진:</span>
+                              <span class="font-mono font-extrabold text-emerald-600 dark:text-emerald-400">${calc.totalWos.toFixed(1)}주 <span class="text-[9px] font-normal text-[var(--muted-foreground)]">(${calc.totalDepletionLabel})</span></span>
+                            </div>
+                          </div>
                         </div>
                       </td>
 
@@ -2742,6 +2787,26 @@
                         <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">
                           ${escapeHtml(calc.overallStatus.actionMsg)}
                         </p>
+                        <!-- 우측 요약: 1. 최근 3주 평균 판매량 / 2. I_01, I_02 예상 소진 주차수 -->
+                        <div class="p-2 rounded-xl bg-[var(--background)] border border-[var(--border)] text-[10px] space-y-1">
+                          <div class="font-bold text-[var(--foreground)] border-b border-[var(--border)] pb-1 mb-1">⏱️ 판매 속도 &amp; 예상 소진 주차수</div>
+                          <div class="flex items-center justify-between">
+                            <span class="text-[var(--muted-foreground)]">평균 주간판매(최근3주):</span>
+                            <b class="font-mono text-[var(--foreground)]">${calc.avgWeeklySales3W.toFixed(1)}개/주</b>
+                          </div>
+                          <div class="flex items-center justify-between">
+                            <span class="text-blue-600 dark:text-blue-400">I_01(${entry.inv01Current.toLocaleString()}) 소진:</span>
+                            <b class="font-mono text-blue-600 dark:text-blue-400">약 ${calc.wosI01.toFixed(1)}주 (${calc.i01DepletionLabel})</b>
+                          </div>
+                          <div class="flex items-center justify-between">
+                            <span class="text-purple-600 dark:text-purple-400">I_02(${entry.inv02Current.toLocaleString()}) 소진:</span>
+                            <b class="font-mono text-purple-600 dark:text-purple-400">약 ${calc.wosI02.toFixed(1)}주</b>
+                          </div>
+                          <div class="flex items-center justify-between pt-1 border-t border-[var(--border)]">
+                            <span class="font-bold text-emerald-600 dark:text-emerald-400">합산(${calc.totalCombinedStock.toLocaleString()}) 소진:</span>
+                            <b class="font-mono text-emerald-600 dark:text-emerald-400">약 ${calc.totalWos.toFixed(1)}주 (${calc.totalDepletionLabel})</b>
+                          </div>
+                        </div>
                         <div class="text-[10px] font-mono text-[var(--muted-foreground)] pt-1 border-t border-[var(--border)] space-y-0.5">
                           <div>· 46w I_01-S = <b class="text-[var(--foreground)]">${calc.currI01Diff >= 0 ? '+' : ''}${calc.currI01Diff.toLocaleString()}</b></div>
                           <div>· 46w I_02-I_01-S = <b class="text-[var(--foreground)]">${calc.currI02Diff >= 0 ? '+' : ''}${calc.currI02Diff.toLocaleString()}</b></div>
