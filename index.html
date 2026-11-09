@@ -154,9 +154,9 @@
           <button onclick="setView('table')" id="tab-table" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
             전체 모델(SKU) 표
           </button>
-          <button onclick="setView('psi')" id="tab-psi" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
-            📦 PSI 수급·재고 (ShipHero)
-          </button>
+          <a href="psi.html" id="tab-psi" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10">
+            📦 PSI 수급·재고 (별도 페이지 ↗)
+          </a>
         </div>
 
         <!-- Google Sheet Sync Button -->
@@ -218,49 +218,6 @@
       </div>
 
       <div id="charts-body" class="grid grid-cols-1 xl:grid-cols-12 gap-5"></div>
-    </section>
-
-    <!-- PSI (Production - Sales - Inventory) Weekly Supply & Demand Dashboard Section -->
-    <section id="psi-section" class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 shadow-sm space-y-4 animate-fade">
-      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
-        <div class="space-y-1">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="px-2.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-xs font-bold">ShipHero × BJ-AS 연동</span>
-            <h2 class="text-sm font-bold text-[var(--foreground)]">📦 PSI 주간 수급 및 재고 부족/과잉 판정 대시보드 (과거 2주 + 현재 + 미래 6주)</h2>
-            <span id="psi-sync-badge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)]">실시간 시뮬레이션 활성</span>
-          </div>
-          <p class="text-xs text-[var(--muted-foreground)]">
-            <b>P</b>: 생산요청 (빈칸 수동입력) &nbsp;|&nbsp;
-            <b>S</b>: 주간 판매량(출고수량) &nbsp;|&nbsp;
-            <b>I_01 (ShipHero · US 3PL)</b>: 매주 월요일 업데이트 · <b class="text-blue-500">과부족 = I_01 - S (3주 LT)</b> &nbsp;|&nbsp;
-            <b>I_02 (BJ-AS · KR)</b>: 수기 입력 기준 고정 관리 · <b class="text-purple-500">과부족 = I_02 - I_01 - S (12주 LT)</b>
-          </p>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="inline-flex rounded-lg bg-[var(--background)] p-0.5 border border-[var(--border)] text-xs">
-            <button type="button" id="psi-scope-shiphero" onclick="setPsiScope('shiphero')" class="px-2.5 py-1 rounded-md font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] transition-all">
-              ShipHero / US 주력 SKU
-            </button>
-            <button type="button" id="psi-scope-all" onclick="setPsiScope('all')" class="px-2.5 py-1 rounded-md font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-all">
-              전체 판매 SKU
-            </button>
-          </div>
-
-          <button type="button" onclick="syncShipHeroLive()" id="psi-sync-btn" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all" title="ShipHero 계정에서 최신 재고(Inventory01)와 출고수량(Sales)을 불러옵니다">
-            <svg id="psi-sync-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            <span>ShipHero 실시간 동기화</span>
-          </button>
-
-          <button type="button" onclick="resetPsiOverrides()" class="px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--secondary)] text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors" title="수동 입력값 초기화">
-            초기화
-          </button>
-
-          <button type="button" onclick="togglePsiSection()" id="psi-toggle-btn" class="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] ml-1 whitespace-nowrap">접기 ▲</button>
-        </div>
-      </div>
-
-      <div id="psi-body" class="space-y-4"></div>
     </section>
 
     <!-- Weekly Key Action & Issue Highlight Banner -->
@@ -1025,6 +982,10 @@
     }
 
     function setView(view) {
+      if (view === 'psi') {
+        window.location.href = 'psi.html';
+        return;
+      }
       currentView = view;
       ['kanban', 'group', 'table', 'psi'].forEach(v => {
         const btn = document.getElementById('tab-' + v);
