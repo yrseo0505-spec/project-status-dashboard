@@ -4,36 +4,79 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PSI 주간 수급·재고 대시보드 (ShipHero × BJ-AS)</title>
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <!-- React 18 & Recharts UMD Bundle -->
+  <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
   <style>
     :root {
-      --background: #f8fafc;
+      --background: #f1f5f9;
       --foreground: #0f172a;
       --card: #ffffff;
       --border: #e2e8f0;
       --muted-foreground: #64748b;
       --primary: #2563eb;
       --primary-foreground: #ffffff;
-      --secondary: #f1f5f9;
+      --secondary: #f8fafc;
       --secondary-foreground: #1e293b;
+      --chart-grid: #e2e8f0;
+      --chart-tooltip-bg: rgba(255, 255, 255, 0.96);
+    }
+    html.dark {
+      --background: #070b14;
+      --foreground: #f8fafc;
+      --card: #0f172a;
+      --border: #1e293b;
+      --muted-foreground: #94a3b8;
+      --primary: #3b82f6;
+      --primary-foreground: #ffffff;
+      --secondary: #1e293b;
+      --secondary-foreground: #f1f5f9;
+      --chart-grid: #1e293b;
+      --chart-tooltip-bg: rgba(15, 23, 42, 0.96);
     }
     @media (prefers-color-scheme: dark) {
-      :root {
-        --background: #0b0f19;
-        --foreground: #f1f5f9;
-        --card: #111827;
+      :root:not(.light) {
+        --background: #070b14;
+        --foreground: #f8fafc;
+        --card: #0f172a;
         --border: #1e293b;
         --muted-foreground: #94a3b8;
         --primary: #3b82f6;
         --primary-foreground: #ffffff;
         --secondary: #1e293b;
         --secondary-foreground: #f1f5f9;
+        --chart-grid: #1e293b;
+        --chart-tooltip-bg: rgba(15, 23, 42, 0.96);
       }
     }
     * { box-sizing: border-box; }
     body {
-      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Malgun Gothic', sans-serif;
+      font-family: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Malgun Gothic', sans-serif;
+      background-image:
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.07) 0px, transparent 45%),
+        radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.07) 0px, transparent 45%),
+        radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+    }
+    .glass-card {
+      background: var(--card);
+      box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 1px 3px 0 rgba(15, 23, 42, 0.03);
+    }
+    .recharts-default-tooltip {
+      border-radius: 12px !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2) !important;
+      backdrop-filter: blur(8px);
     }
     .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -48,7 +91,7 @@
       25% { transform: translateX(-6px); }
       75% { transform: translateX(6px); }
     }
-    .animate-fade { animation: fadeIn 0.2s ease-out forwards; }
+    .animate-fade { animation: fadeIn 0.22s ease-out forwards; }
     .animate-shake { animation: shake 0.25s ease-in-out 2; }
   </style>
 </head>
@@ -170,6 +213,10 @@
 
         <button type="button" onclick="resetPsiOverrides()" class="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--secondary)] text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors" title="P(생산요청) 초기화 (I_02 수기 재고는 유지)">
           P/S 초기화
+        </button>
+
+        <button type="button" onclick="toggleThemeMode()" id="theme-toggle-btn" class="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--secondary)] text-xs font-semibold flex items-center gap-1.5 transition-colors" title="다크/라이트 테마 전환">
+          🌙 다크
         </button>
 
         <button onclick="lockDashboard()" class="px-3 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors" title="화면 즉시 잠금">
@@ -1705,16 +1752,13 @@
               ` : ''}
             </div>
 
-            <!-- Donut Chart + Pipeline Bars -->
+            <!-- Recharts Interactive Donut Chart + Pipeline Bars -->
             <div class="flex flex-col sm:flex-row items-center gap-4 pt-1">
-              <div class="relative w-[140px] h-[140px] shrink-0 flex items-center justify-center">
-                <svg class="w-full h-full -rotate-90" viewBox="0 0 140 140">
-                  <circle cx="70" cy="70" r="${radius}" fill="transparent" stroke="currentColor" stroke-width="18" class="text-[var(--border)]" />
-                  ${donutSegments}
-                </svg>
-                <div onclick="filterByStatus('ALL')" class="cursor-pointer absolute inset-0 flex flex-col items-center justify-center text-center">
+              <div class="relative w-[205px] h-[215px] shrink-0 flex items-center justify-center">
+                <div id="recharts-stage-donut" class="w-full h-full"></div>
+                <div onclick="filterByStatus('ALL')" class="cursor-pointer absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
                   <span class="text-[10px] font-semibold text-[var(--muted-foreground)]">전체 ${unitLabel}</span>
-                  <span class="text-xl font-extrabold text-[var(--foreground)] leading-tight">${totalCount}</span>
+                  <span class="text-2xl font-extrabold font-mono text-[var(--foreground)] leading-tight">${totalCount}</span>
                   <span class="text-[10px] text-[var(--muted-foreground)]">${allGroups.length}그룹 / ${RAW_DATA.length}SKU</span>
                 </div>
               </div>
@@ -1749,14 +1793,13 @@
             </div>
           </div>
 
-          <!-- 바이어별 단계 누적 바 차트 -->
+          <!-- Recharts 바이어별 단계 누적 바 차트 -->
           <div class="pt-3 border-t border-[var(--border)] space-y-2">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-[var(--foreground)]">🏢 바이어별 제품 단계 구성 (${unitLabel} 기준)</span>
-              <div class="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
-                ${stageMeta.map(st => `<span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full ${st.bgCls}"></span>${st.key}</span>`).join('')}
-              </div>
+              <span class="text-xs font-bold text-[var(--foreground)]">🏢 바이어별 제품 단계 구성 (Recharts Stacked Bar · ${unitLabel} 기준)</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 font-semibold">Recharts Interactive</span>
             </div>
+            <div id="recharts-buyer-bar" class="w-full h-[220px]"></div>
             <div class="space-y-1.5">
               ${buyersSorted.map(([buyer, info]) => {
                 const isBuyerSel = selectedBuyer === buyer;
@@ -1798,6 +1841,15 @@
               ` : ''}
             </div>
 
+            <!-- Recharts R&R 조직별 워크로드 차트 -->
+            <div class="p-3 rounded-xl bg-[var(--card)] border border-[var(--border)]">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[11px] font-bold text-[var(--muted-foreground)]">📊 부문별 담당 조직 비중 (Recharts Stacked Workload)</span>
+                <span class="text-[10px] font-mono text-indigo-500 font-semibold">하단 항목 클릭 시 즉시 필터링</span>
+              </div>
+              <div id="recharts-rnr-bar" class="w-full h-[220px]"></div>
+            </div>
+
             <!-- 3대 영역(제품개발 / 패키지개발 / 양산) 막대 그래프 카드 -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
               ${roleDistributionHtml}
@@ -1816,6 +1868,30 @@
           </div>
         </div>
       `;
+
+      // Mount Recharts instances for Stage Donut, Buyer Stacked Bar, and R&R Workload Bar
+      const rechartsStageData = stageMeta.map(st => ({
+        key: st.key,
+        name: st.label,
+        value: activeStageCounts[st.key] || 0,
+        color: st.color
+      }));
+      const rechartsBuyerData = buyersSorted.map(([buyer, info]) => ({
+        buyer,
+        '판매': info['판매'] || 0,
+        '개발': info['개발'] || 0,
+        '디자인': info['디자인'] || 0,
+        '컨셉': info['컨셉'] || 0
+      }));
+      const rechartsRnRData = roleCategories.map(rc => {
+        const rowObj = { roleName: rc.title.replace(/^[^ ]+ /, '').split(' ')[0] };
+        items.forEach(it => {
+          const k = normalizeOwner(it[rc.field]);
+          rowObj[k] = (rowObj[k] || 0) + 1;
+        });
+        return rowObj;
+      });
+      setTimeout(() => mountProjectRecharts(rechartsStageData, rechartsBuyerData, rechartsRnRData, unitLabel), 0);
     }
 
     // =========================================================================
@@ -2623,7 +2699,49 @@
           </div>
         </div>
 
-        <!-- 2. 첨부 이미지 기준 과부족 공식 안내 및 I_01 기준 선택 바 -->
+        <!-- 2. Recharts 기반 PSI 주간 수급 추이 & 예상 소진 주차수(WOS) 시각화 패널 -->
+        <div class="p-4 rounded-2xl bg-[var(--background)]/70 border border-[var(--border)] space-y-3">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-2 border-b border-[var(--border)]">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="px-2.5 py-0.5 rounded-md bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 text-xs font-bold font-mono">Recharts Analytics</span>
+              <h3 class="text-xs font-extrabold text-[var(--foreground)]">📈 주간 판매(S) · I_01 재고 · 과부족 추이 &amp; SKU별 예상 소진 주차수 (최근 3주 평균 기준)</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-1">
+              <button type="button" onclick="selectPsiChartSku('ALL')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${psiSelectedChartSku === 'ALL' ? 'bg-blue-600 text-white shadow-sm' : 'bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]'}">
+                전체 합산 (${entriesWithCalc.length}종)
+              </button>
+              ${entriesWithCalc.map(({ entry }) => {
+                const isSel = psiSelectedChartSku === entry.model;
+                const shortLabel = entry.shipheroSku.replace('CDO-999-', 'CDO-').replace('CCO-999-', 'CCO-');
+                return `
+                  <button type="button" onclick="selectPsiChartSku('${escapeHtml(entry.model)}')" class="px-2 py-1 rounded-lg text-[11px] font-mono font-bold transition-all ${isSel ? 'bg-blue-600 text-white shadow-sm' : 'bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]'}">
+                    ${escapeHtml(shortLabel)}
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+            <div class="xl:col-span-7 p-3.5 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-1">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-[var(--foreground)]">📊 9주간 (44w~52w) 주간 판매량(S) · I_01 재고 · 과부족(I_01-S) 추이 ${psiSelectedChartSku === 'ALL' ? '(전체 합산)' : `[${escapeHtml(psiSelectedChartSku)}]`}</span>
+                <span class="text-[10px] font-mono text-[var(--muted-foreground)]">Recharts ComposedChart</span>
+              </div>
+              <div id="recharts-psi-weekly-trend" class="w-full h-[255px]"></div>
+            </div>
+
+            <div class="xl:col-span-5 p-3.5 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-1">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-[var(--foreground)]">⏱️ 최근 3주 평균 판매량 대비 I_01 · I_02 예상 소진 주차수 (WOS)</span>
+                <span class="text-[10px] font-mono text-[var(--muted-foreground)]">막대 클릭 시 SKU 필터</span>
+              </div>
+              <div id="recharts-psi-wos-bar" class="w-full h-[255px]"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 첨부 이미지 기준 과부족 공식 안내 및 I_01 기준 선택 바 -->
         <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)] flex flex-col lg:flex-row lg:items-center justify-between gap-2 text-xs">
           <div class="space-y-1">
             <div class="flex items-center gap-2 flex-wrap">
@@ -2907,7 +3025,284 @@
       `;
     }
 
+
+    // =========================================================================
+    // Recharts (React 18) 시각화 렌더링 엔진 (프로젝트 현황판 & PSI 대시보드)
+    // =========================================================================
+    let rechartsRoots = {};
+    let psiSelectedChartSku = 'ALL'; // 'ALL' | 'CDO-999-WT01-US' | ...
+
+    function getOrCreateReactRoot(domId) {
+      const el = document.getElementById(domId);
+      if (!el || !window.ReactDOM || !window.React || !window.Recharts) return null;
+      if (rechartsRoots[domId] && rechartsRoots[domId].container === el) {
+        return rechartsRoots[domId].root;
+      }
+      const root = window.ReactDOM.createRoot(el);
+      rechartsRoots[domId] = { container: el, root };
+      return root;
+    }
+
+    function toggleThemeMode() {
+      const rootEl = document.documentElement;
+      const isDark = rootEl.classList.contains('dark') ||
+        (!rootEl.classList.contains('light') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      if (isDark) {
+        rootEl.classList.remove('dark');
+        rootEl.classList.add('light');
+        localStorage.setItem('diofit_theme', 'light');
+      } else {
+        rootEl.classList.remove('light');
+        rootEl.classList.add('dark');
+        localStorage.setItem('diofit_theme', 'dark');
+      }
+      updateThemeBtnLabel();
+      renderVisualCharts();
+      renderPsiDashboard();
+    }
+
+    function updateThemeBtnLabel() {
+      const btn = document.getElementById('theme-toggle-btn');
+      if (!btn) return;
+      const rootEl = document.documentElement;
+      const isDark = rootEl.classList.contains('dark') ||
+        (!rootEl.classList.contains('light') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      btn.innerHTML = isDark ? '☀️ 라이트' : '🌙 다크';
+    }
+
+    (function initSavedTheme() {
+      try {
+        const saved = localStorage.getItem('diofit_theme');
+        if (saved === 'dark') document.documentElement.classList.add('dark');
+        if (saved === 'light') document.documentElement.classList.add('light');
+      } catch (_) {}
+    })();
+
+    function selectPsiChartSku(sku) {
+      psiSelectedChartSku = sku;
+      renderPsiDashboard();
+    }
+
+    // 1) 프로젝트 현황판(index.html) 전용 Recharts 마운트
+    function mountProjectRecharts(stageData, buyerStackData, rnrRoleData, unitLabel) {
+      if (!window.React || !window.ReactDOM || !window.Recharts) return;
+      const h = window.React.createElement;
+      const {
+        ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend,
+        BarChart, Bar, XAxis, YAxis, CartesianGrid
+      } = window.Recharts;
+
+      const tooltipStyle = {
+        backgroundColor: 'var(--chart-tooltip-bg)',
+        border: '1px solid var(--border)',
+        borderRadius: '12px',
+        fontSize: '12px',
+        color: 'var(--foreground)'
+      };
+
+      // (A) Stage Donut Chart (Recharts PieChart)
+      const stageRoot = getOrCreateReactRoot('recharts-stage-donut');
+      if (stageRoot) {
+        stageRoot.render(
+          h(ResponsiveContainer, { width: '100%', height: 215 },
+            h(PieChart, null,
+              h(Pie, {
+                data: stageData,
+                dataKey: 'value',
+                nameKey: 'name',
+                cx: '50%',
+                cy: '50%',
+                innerRadius: 54,
+                outerRadius: 84,
+                paddingAngle: 4,
+                stroke: 'none',
+                onClick: (entry) => { if (entry && entry.key) filterByStatus(entry.key); }
+              },
+                stageData.map((entry, idx) =>
+                  h(Cell, {
+                    key: 'cell-' + idx,
+                    fill: entry.color,
+                    style: { cursor: 'pointer', outline: 'none' }
+                  })
+                )
+              ),
+              h(Tooltip, {
+                contentStyle: tooltipStyle,
+                formatter: (val, name) => [`${val}${unitLabel}`, name]
+              })
+            )
+          )
+        );
+      }
+
+      // (B) Buyer x Stage Stacked BarChart (Recharts BarChart)
+      const buyerRoot = getOrCreateReactRoot('recharts-buyer-bar');
+      if (buyerRoot) {
+        buyerRoot.render(
+          h(ResponsiveContainer, { width: '100%', height: 220 },
+            h(BarChart, {
+              data: buyerStackData,
+              margin: { top: 8, right: 12, left: -18, bottom: 0 },
+              onClick: (state) => {
+                if (state && state.activeLabel) filterByBuyer(state.activeLabel);
+              }
+            },
+              h(CartesianGrid, { strokeDasharray: '3 3', stroke: 'var(--chart-grid)', vertical: false }),
+              h(XAxis, { dataKey: 'buyer', tick: { fill: 'var(--muted-foreground)', fontSize: 11, fontWeight: 700 }, axisLine: false, tickLine: false }),
+              h(YAxis, { tick: { fill: 'var(--muted-foreground)', fontSize: 11 }, axisLine: false, tickLine: false }),
+              h(Tooltip, { contentStyle: tooltipStyle }),
+              h(Legend, { wrapperStyle: { fontSize: '11px', paddingTop: '4px' } }),
+              h(Bar, { dataKey: '판매', stackId: 'a', fill: '#10b981', radius: [0, 0, 0, 0], style: { cursor: 'pointer' } }),
+              h(Bar, { dataKey: '개발', stackId: 'a', fill: '#3b82f6', style: { cursor: 'pointer' } }),
+              h(Bar, { dataKey: '디자인', stackId: 'a', fill: '#f59e0b', style: { cursor: 'pointer' } }),
+              h(Bar, { dataKey: '컨셉', stackId: 'a', fill: '#a855f7', radius: [6, 6, 0, 0], style: { cursor: 'pointer' } })
+            )
+          )
+        );
+      }
+
+      // (C) R&R Workload Stacked BarChart (Recharts BarChart)
+      const rnrRoot = getOrCreateReactRoot('recharts-rnr-bar');
+      if (rnrRoot) {
+        rnrRoot.render(
+          h(ResponsiveContainer, { width: '100%', height: 220 },
+            h(BarChart, {
+              data: rnrRoleData,
+              layout: 'vertical',
+              margin: { top: 6, right: 18, left: 10, bottom: 0 }
+            },
+              h(CartesianGrid, { strokeDasharray: '3 3', stroke: 'var(--chart-grid)', horizontal: false }),
+              h(XAxis, { type: 'number', tick: { fill: 'var(--muted-foreground)', fontSize: 11 }, axisLine: false, tickLine: false }),
+              h(YAxis, { type: 'category', dataKey: 'roleName', width: 78, tick: { fill: 'var(--foreground)', fontSize: 11, fontWeight: 700 }, axisLine: false, tickLine: false }),
+              h(Tooltip, { contentStyle: tooltipStyle }),
+              h(Legend, { wrapperStyle: { fontSize: '11px', paddingTop: '4px' } }),
+              h(Bar, { dataKey: 'APD-G', stackId: 'rnr', fill: '#3b82f6', barSize: 22 }),
+              h(Bar, { dataKey: 'B2C사업팀', stackId: 'rnr', fill: '#6366f1', barSize: 22 }),
+              h(Bar, { dataKey: 'BJ(안산)', stackId: 'rnr', fill: '#10b981', barSize: 22 }),
+              h(Bar, { dataKey: '외주', stackId: 'rnr', fill: '#f59e0b', barSize: 22 }),
+              h(Bar, { dataKey: '완료', stackId: 'rnr', fill: '#14b8a6', barSize: 22 }),
+              h(Bar, { dataKey: '미정(-)', stackId: 'rnr', fill: '#94a3b8', radius: [0, 6, 6, 0], barSize: 22 })
+            )
+          )
+        );
+      }
+    }
+
+    // 2) PSI 대시보드(psi.html) 전용 Recharts 마운트
+    function mountPsiRecharts(entriesWithCalc) {
+      if (!window.React || !window.ReactDOM || !window.Recharts) return;
+      const h = window.React.createElement;
+      const {
+        ResponsiveContainer, ComposedChart, BarChart, Bar, Area, Line,
+        XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, Cell
+      } = window.Recharts;
+
+      const tooltipStyle = {
+        backgroundColor: 'var(--chart-tooltip-bg)',
+        border: '1px solid var(--border)',
+        borderRadius: '12px',
+        fontSize: '12px',
+        color: 'var(--foreground)'
+      };
+
+      // (A) 9주간 (44w~52w) 주간 수급 추이 데이터 (전체 합산 또는 개별 SKU)
+      const targetList = psiSelectedChartSku === 'ALL'
+        ? entriesWithCalc
+        : entriesWithCalc.filter(x => x.entry.model === psiSelectedChartSku);
+      const activeList = targetList.length > 0 ? targetList : entriesWithCalc;
+
+      const weeklyTrendData = PSI_WEEKS.map((wk, w) => {
+        let sumS = 0, sumP = 0, sumI01 = 0, sumI02 = 0, sumDiff01 = 0, sumDiff02 = 0;
+        activeList.forEach(({ calc }) => {
+          sumS += (calc.sales[w] || 0);
+          sumP += (calc.prods[w] || 0);
+          sumI01 += (calc.inv01[w] || 0);
+          sumI02 += (calc.inv02[w] || 0);
+          sumDiff01 += (calc.i01Diff[w] || 0);
+          sumDiff02 += (calc.i02Diff[w] || 0);
+        });
+        return {
+          name: `${wk.code} ${wk.dateRange}`,
+          shortName: wk.code,
+          'S (주간판매)': sumS,
+          'I_01 (ShipHero 재고)': sumI01,
+          'I_01 과부족 (I_01-S)': sumDiff01,
+          'I_02 과부족 (I_02-I_01-S)': sumDiff02,
+          'P (생산발주)': sumP
+        };
+      });
+
+      const trendRoot = getOrCreateReactRoot('recharts-psi-weekly-trend');
+      if (trendRoot) {
+        trendRoot.render(
+          h(ResponsiveContainer, { width: '100%', height: 255 },
+            h(ComposedChart, { data: weeklyTrendData, margin: { top: 10, right: 16, left: -10, bottom: 0 } },
+              h('defs', null,
+                h('linearGradient', { id: 'gradI01', x1: '0', y1: '0', x2: '0', y2: '1' },
+                  h('stop', { offset: '5%', stopColor: '#3b82f6', stopOpacity: 0.32 }),
+                  h('stop', { offset: '95%', stopColor: '#3b82f6', stopOpacity: 0.02 })
+                )
+              ),
+              h(CartesianGrid, { strokeDasharray: '3 3', stroke: 'var(--chart-grid)', vertical: false }),
+              h(XAxis, { dataKey: 'shortName', tick: { fill: 'var(--foreground)', fontSize: 11, fontWeight: 700 }, axisLine: false, tickLine: false }),
+              h(YAxis, { tick: { fill: 'var(--muted-foreground)', fontSize: 11 }, axisLine: false, tickLine: false }),
+              h(Tooltip, { contentStyle: tooltipStyle }),
+              h(Legend, { wrapperStyle: { fontSize: '11px', paddingTop: '6px' } }),
+              h(ReferenceLine, { y: 0, stroke: '#f43f5e', strokeDasharray: '4 4', strokeWidth: 1.5 }),
+              h(Area, { type: 'monotone', dataKey: 'I_01 (ShipHero 재고)', fill: 'url(#gradI01)', stroke: '#3b82f6', strokeWidth: 2.5 }),
+              h(Bar, { dataKey: 'S (주간판매)', fill: '#f59e0b', radius: [5, 5, 0, 0], barSize: 22 }),
+              h(Line, { type: 'monotone', dataKey: 'I_01 과부족 (I_01-S)', stroke: '#10b981', strokeWidth: 2.5, dot: { r: 4, fill: '#10b981' } })
+            )
+          )
+        );
+      }
+
+      // (B) SKU별 최근 3주 평균 판매량 & 예상 소진 주차수 (Weeks of Supply) 차트
+      const wosData = entriesWithCalc.map(({ entry, calc }) => {
+        const shortSku = entry.shipheroSku.replace('CDO-999-', 'CDO-').replace('CCO-999-', 'CCO-');
+        return {
+          sku: shortSku,
+          fullModel: entry.model,
+          '최근3주 평균판매(개/주)': Number(calc.avgWeeklySales3W.toFixed(1)),
+          'I_01 예상소진(주)': Number(Math.min(99, calc.wosI01).toFixed(1)),
+          'I_02 예상소진(주)': Number(Math.min(120, calc.wosI02).toFixed(1)),
+          '합산 소진(주)': Number(Math.min(150, calc.totalWos).toFixed(1))
+        };
+      });
+
+      const wosRoot = getOrCreateReactRoot('recharts-psi-wos-bar');
+      if (wosRoot) {
+        wosRoot.render(
+          h(ResponsiveContainer, { width: '100%', height: 255 },
+            h(ComposedChart, {
+              data: wosData,
+              margin: { top: 10, right: 16, left: -10, bottom: 0 },
+              onClick: (st) => {
+                if (st && st.activePayload && st.activePayload[0]) {
+                  const m = st.activePayload[0].payload.fullModel;
+                  if (m) selectPsiChartSku(psiSelectedChartSku === m ? 'ALL' : m);
+                }
+              }
+            },
+              h(CartesianGrid, { strokeDasharray: '3 3', stroke: 'var(--chart-grid)', vertical: false }),
+              h(XAxis, { dataKey: 'sku', tick: { fill: 'var(--foreground)', fontSize: 11, fontWeight: 700 }, axisLine: false, tickLine: false }),
+              h(YAxis, { yAxisId: 'left', tick: { fill: 'var(--muted-foreground)', fontSize: 11 }, axisLine: false, tickLine: false, unit: '주' }),
+              h(YAxis, { yAxisId: 'right', orientation: 'right', tick: { fill: '#f59e0b', fontSize: 11 }, axisLine: false, tickLine: false, unit: '개' }),
+              h(Tooltip, { contentStyle: tooltipStyle }),
+              h(Legend, { wrapperStyle: { fontSize: '11px', paddingTop: '6px' } }),
+              h(ReferenceLine, { yAxisId: 'left', y: 3, stroke: '#3b82f6', strokeDasharray: '3 3', label: { value: '3주 LT', fill: '#3b82f6', fontSize: 10 } }),
+              h(ReferenceLine, { yAxisId: 'left', y: 12, stroke: '#a855f7', strokeDasharray: '3 3', label: { value: '12주 LT', fill: '#a855f7', fontSize: 10 } }),
+              h(Bar, { yAxisId: 'left', dataKey: 'I_01 예상소진(주)', stackId: 'wos', fill: '#3b82f6', barSize: 26, style: { cursor: 'pointer' } }),
+              h(Bar, { yAxisId: 'left', dataKey: 'I_02 예상소진(주)', stackId: 'wos', fill: '#a855f7', radius: [6, 6, 0, 0], barSize: 26, style: { cursor: 'pointer' } }),
+              h(Line, { yAxisId: 'right', type: 'monotone', dataKey: '최근3주 평균판매(개/주)', stroke: '#f59e0b', strokeWidth: 2.5, dot: { r: 4, fill: '#f59e0b' } })
+            )
+          )
+        );
+      }
+    }
+
     function renderPsiDashboard() {
+      updateThemeBtnLabel();
       const container = document.getElementById('psi-body');
       if (!container) return;
       const targetRows = getPsiTargetRows();
@@ -2917,6 +3312,7 @@
         return { entry, calc };
       });
       container.innerHTML = buildPsiDashboardHtml(entriesWithCalc);
+      setTimeout(() => mountPsiRecharts(entriesWithCalc), 0);
     }
 
     function renderPsiMainView(filteredRows) {
