@@ -1955,7 +1955,7 @@
     const PSI_LT_INV01 = 3;  // I_01 (ShipHero) 리드타임: 3주 LT
     const PSI_LT_INV02 = 12; // I_02 (BJ-AS) 리드타임: 12주 LT
     const PSI_STORAGE_KEY = 'diofit_psi_state_v4';
-    const PSI_PREV_STORAGE_KEY = 'diofit_psi_state_v3';
+    const PSI_INV02_MANUAL_KEY = 'diofit_psi_inv02_manual_lock'; // 사용자 수기 I_02 전용 영구 저장소 (시스템 업데이트 절대 금지)
     const PSI_MONDAY_SYNC_KEY = 'diofit_psi_last_monday_sync';
     let psiScope = 'shiphero'; // 'shiphero' | 'all'
     let psiStatusFilter = 'ALL'; // 'ALL' | 'I01_SHORT' | 'I02_SHORT' | 'OPTIMAL'
@@ -2056,16 +2056,64 @@
       }
     };
 
+    // 사용자가 수기로 입력한 I_02 재고만 별도 영구 보관 (어떠한 자동 업데이트/초기화/버전변경에서도 절대 덮어쓰지 않음)
+    function loadLockedInv02Map() {
+      try {
+        const lockedRaw = localStorage.getItem(PSI_INV02_MANUAL_KEY);
+        if (lockedRaw) {
+          return JSON.parse(lockedRaw);
+        }
+        // 최초 1회: 이전 스토리지(v4 -> v3 -> v2 -> v1)에서 사용자가 직접 입력했던 inv02Current 값을 복원
+        const oldSeeds = new Set([850, 150, 240, 180, 90, 300, 260, 520, 480]);
+        const recovered = {};
+        ['diofit_psi_state_v4', 'diofit_psi_state_v3', 'diofit_psi_state_v2', 'diofit_psi_state_v1'].forEach(k => {
+          try {
+            const raw = localStorage.getItem(k);
+            if (!raw) return;
+            const obj = JSON.parse(raw);
+            Object.entries(obj || {}).forEach(([sku, val]) => {
+              if (val && val.inv02Current !== undefined && recovered[sku] === undefined) {
+                const num = Number(val.inv02Current);
+                if (!oldSeeds.has(num)) {
+                  recovered[sku] = num;
+                }
+              }
+            });
+          } catch (_) {}
+        });
+        // 사용자가 업데이트해둔 2000 기준값 보장 (이미 수기 입력한 값이 있으면 그 값 유지)
+        Object.keys(SHIPHERO_BASE_SEEDS).forEach(sku => {
+          if (recovered[sku] === undefined) {
+            recovered[sku] = 2000;
+          }
+        });
+        localStorage.setItem(PSI_INV02_MANUAL_KEY, JSON.stringify(recovered));
+        return recovered;
+      } catch (_) {}
+      return {};
+    }
+
+    let psiLockedInv02Map = loadLockedInv02Map();
+
+    function saveUserManualInv02(model, val) {
+      const cleanVal = Math.max(0, parseInt(val, 10) || 0);
+      psiLockedInv02Map[model] = cleanVal;
+      try {
+        localStorage.setItem(PSI_INV02_MANUAL_KEY, JSON.stringify(psiLockedInv02Map));
+      } catch (_) {}
+    }
+
     function loadPsiUserState() {
       try {
         const rawV4 = localStorage.getItem(PSI_STORAGE_KEY);
         if (rawV4) return JSON.parse(rawV4);
-        // 이전 버전(v3)에 사용자가 입력한 I_02, I_01, P, S 데이터가 있으면 그대로 승계!
-        const rawV3 = localStorage.getItem(PSI_PREV_STORAGE_KEY);
-        if (rawV3) {
-          const parsed = JSON.parse(rawV3);
-          localStorage.setItem(PSI_STORAGE_KEY, JSON.stringify(parsed));
-          return parsed;
+        for (const k of ['diofit_psi_state_v3', 'diofit_psi_state_v2', 'diofit_psi_state_v1']) {
+          const rawPrev = localStorage.getItem(k);
+          if (rawPrev) {
+            const parsed = JSON.parse(rawPrev);
+            localStorage.setItem(PSI_STORAGE_KEY, JSON.stringify(parsed));
+            return parsed;
+          }
         }
       } catch (_) {}
       return {};
@@ -2107,8 +2155,8 @@
         inv01OnHand: saved.inv01OnHand !== undefined ? Number(saved.inv01OnHand) : (seed.inv01OnHand || seed.inv01Current || 0),
         inv01Available: saved.inv01Available !== undefined ? Number(saved.inv01Available) : (seed.inv01Available || seed.inv01Current || 0),
         inv01Current: saved.inv01Current !== undefined ? Number(saved.inv01Current) : defaultInv01,
-        // I_02는 사용자가 입력한 값을 절대 변경하지 않고 그대로 사용 (기본 시드 2,000)
-        inv02Current: saved.inv02Current !== undefined ? Number(saved.inv02Current) : seed.inv02Current,
+        // I_02는 오직 사용자 전용 수기 저장소(psiLockedInv02Map)의 값만 사용 (시스템 자동 변경 절대 금지)
+        inv02Current: psiLockedInv02Map[modelKey] !== undefined ? Number(psiLockedInv02Map[modelKey]) : seed.inv02Current,
         sales: Array.isArray(saved.sales) && saved.sales.length === 9 ? saved.sales.map(Number) : [...seed.sales],
         production: Array.isArray(saved.production) && saved.production.length === 9 ? [...saved.production] : [...seed.production]
       };
@@ -2382,6 +2430,10 @@
     }
 
     function updatePsiStock(model, field, val) {
+      // 사용자가 직접 UI의 I_02 입력창을 수정한 경우에만 수기 전용 저장소 업데이트
+      if (field === 'inv02Current') {
+        saveUserManualInv02(model, val);
+      }
       if (!psiUserState[model]) {
         const row = RAW_DATA.find(r => r.model === model) || { model, buyer: 'orna', project: model, item: model, status: '판매' };
         const base = getPsiEntryForModel(row);
@@ -2389,12 +2441,16 @@
           inv01OnHand: base.inv01OnHand,
           inv01Available: base.inv01Available,
           inv01Current: base.inv01Current,
-          inv02Current: base.inv02Current,
+          inv02Current: psiLockedInv02Map[model] !== undefined ? psiLockedInv02Map[model] : base.inv02Current,
           sales: [...base.sales],
           production: [...base.production]
         };
       }
-      psiUserState[model][field] = Math.max(0, parseInt(val, 10) || 0);
+      if (field !== 'inv02Current') {
+        psiUserState[model][field] = Math.max(0, parseInt(val, 10) || 0);
+      } else {
+        psiUserState[model].inv02Current = psiLockedInv02Map[model];
+      }
       savePsiUserState(psiUserState);
       renderPsiDashboard();
       if (currentView === 'psi') {
