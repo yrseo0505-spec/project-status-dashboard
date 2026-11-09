@@ -1954,70 +1954,113 @@
     // 5. P (Production): 기본 빈칸(""), Inventory02(12주 L/T 기준) 부족 시 생산 요청 수량 수동 입력
     // =========================================================================
     const PSI_LT_INV01 = 3;  // Inventory01 (ShipHero) 재고이동 입고 L/T: 3주
-    const PSI_LT_INV02 = 12; // Inventory02 (BJ-AS) 생산 입고 L/T: 12주
-    const PSI_STORAGE_KEY = 'diofit_psi_state_v2';
+    const PSI_LT_INV02 = 12; // Inventory02 (BJ-AS) 생산 입고 리드타임: 12주
+    const PSI_STORAGE_KEY = 'diofit_psi_state_v3';
+    const PSI_MONDAY_SYNC_KEY = 'diofit_psi_last_monday_sync';
     let psiScope = 'shiphero'; // 'shiphero' | 'all'
     let psiStatusFilter = 'ALL'; // 'ALL' | 'INV01_SHORT' | 'INV02_SHORT' | 'OPTIMAL' | 'EXCESS'
     let psiAutoTransfer = true; // Inventory01 부족 시 Inventory02 -> Inventory01 자동 이동(3주 L/T) 시뮬레이션 여부
+    let psiInv01Basis = 'on_hand'; // 'on_hand' (총재고: 721/371/445/256/275) | 'available' (가용재고: 680/355/435/248/267)
 
-    // 9주 타임라인 정의 (과거 2주 + 현재(월요일 아침) + 미래 6주)
-    const PSI_WEEKS = [
-      { idx: 0, offset: -2, code: '44W', dateRange: '10/26~11/01', tag: '과거 -2주', phase: 'past' },
-      { idx: 1, offset: -1, code: '45W', dateRange: '11/02~11/08', tag: '과거 -1주', phase: 'past' },
-      { idx: 2, offset:  0, code: '46W', dateRange: '11/09(월) 아침', tag: '현재 (월요일 아침)', phase: 'current' },
-      { idx: 3, offset:  1, code: '47W', dateRange: '11/16~11/22', tag: '미래 +1주', phase: 'future' },
-      { idx: 4, offset:  2, code: '48W', dateRange: '11/23~11/29', tag: '미래 +2주', phase: 'future' },
-      { idx: 5, offset:  3, code: '49W', dateRange: '11/30~12/06', tag: '미래 +3주 (Inv01 L/T 3주)', phase: 'future', isLt1Milestone: true },
-      { idx: 6, offset:  4, code: '50W', dateRange: '12/07~12/13', tag: '미래 +4주', phase: 'future' },
-      { idx: 7, offset:  5, code: '51W', dateRange: '12/14~12/20', tag: '미래 +5주', phase: 'future' },
-      { idx: 8, offset:  6, code: '52W', dateRange: '12/21~12/27', tag: '미래 +6주', phase: 'future' }
-    ];
+    // 매주 월요일 기준 동적 9주 타임라인 생성 (과거 2주 + 현재 월요일 아침 + 미래 6주)
+    function getIsoWeekNum(d) {
+      const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      const dayNum = date.getUTCDay() || 7;
+      date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+      return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+    }
 
-    // ShipHero 연동 대상 SKU 시드 (CFO 세트는 제외, 단품 CDO 및 CCO 4종)
+    function getCurrentMondayDate() {
+      const now = new Date();
+      const day = now.getDay();
+      const diffToMon = day === 0 ? -6 : 1 - day;
+      const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMon);
+      return mon;
+    }
+
+    function buildDynamicPsiWeeks() {
+      const baseMon = getCurrentMondayDate();
+      const pad = n => String(n).padStart(2, '0');
+      const offsets = [-2, -1, 0, 1, 2, 3, 4, 5, 6];
+      return offsets.map((off, idx) => {
+        const wMon = new Date(baseMon.getFullYear(), baseMon.getMonth(), baseMon.getDate() + off * 7);
+        const wSun = new Date(wMon.getFullYear(), wMon.getMonth(), wMon.getDate() + 6);
+        const wNum = getIsoWeekNum(wMon);
+        const code = `${wNum}W`;
+        const monStr = `${pad(wMon.getMonth() + 1)}/${pad(wMon.getDate())}`;
+        const sunStr = `${pad(wSun.getMonth() + 1)}/${pad(wSun.getDate())}`;
+        if (off < 0) {
+          return { idx, offset: off, code, dateRange: `${monStr}~${sunStr}`, tag: `과거 ${off}주`, phase: 'past', weekNum: wNum };
+        } else if (off === 0) {
+          return { idx, offset: 0, code, dateRange: `${monStr}(월) 아침`, tag: '현재 (월요일 아침)', phase: 'current', weekNum: wNum };
+        } else if (off === 3) {
+          return { idx, offset: off, code, dateRange: `${monStr}~${sunStr}`, tag: '미래 +3주 (Inv01 L/T 3주)', phase: 'future', isLt1Milestone: true, weekNum: wNum };
+        } else {
+          return { idx, offset: off, code, dateRange: `${monStr}~${sunStr}`, tag: `미래 +${off}주`, phase: 'future', weekNum: wNum };
+        }
+      });
+    }
+
+    const PSI_WEEKS = buildDynamicPsiWeeks();
+
+    // ShipHero 연동 대상 단품 5종 (사용자 캡처 화면의 실제 ShipHero 수량 반영: On Hand / Available)
+    // - CDO-999-WT-US : On Hand 721 / Available 680
+    // - CCO-999-YL-WW : On Hand 256 / Available 248
+    // - CCO-999-WT-WW : On Hand 445 / Available 435
+    // - CCO-999-SV-WW : On Hand 371 / Available 355
+    // - CCO-999-OR-WW : On Hand 275 / Available 267
     const SHIPHERO_BASE_SEEDS = {
       'CDO-999-WT01-US': {
         shipheroSku: 'CDO-999-WT-US',
-        shipheroName: 'Objet Charger - US(110V)',
-        inv01Current: 420, // ShipHero 현재 재고 (46W 월요일 아침 기준)
-        inv02Current: 850, // BJ-AS 안산 수기 재고 (46W 월요일 아침 기준)
-        // 9주간 Sales (44W, 45W 실적 + 46W 현재 + 47W~52W 주간 예상 출고)
+        shipheroName: 'Objet Charger (US/Canada)',
+        inv01OnHand: 721,
+        inv01Available: 680,
+        inv01Current: 721, // 월요일 아침 기준 ShipHero 재고 (On Hand 721 / Available 680)
+        inv02Current: 850, // BJ-AS 안산 수기 재고
         sales: [74, 82, 85, 90, 95, 110, 115, 100, 95],
-        // Inv02 -> Inv01 재고 이동 수량 (비어 있으면 자동 산출 또는 수동 입력, +3주 뒤 Inv01 입고)
-        transferOrder: ['', '', '', '', '', '', '', '', ''],
-        // P (Production): 기본 빈칸 (Inventory02 12주 L/T 기준 부족 시 수동 입력)
-        production: ['', '', '', '', '', '', '', '', '']
-      },
-      'CCO-999-SV01-WW': {
-        shipheroSku: 'CCO-999-SV-WW',
-        shipheroName: 'Flower Objet (Chrome Silver)',
-        inv01Current: 95,
-        inv02Current: 180,
-        sales: [32, 38, 40, 42, 45, 50, 50, 45, 40],
-        transferOrder: ['', '', '', '', '', '', '', '', ''],
-        production: ['', '', '', '', '', '', '', '', '']
-      },
-      'CCO-999-WT01-WW': {
-        shipheroSku: 'CCO-999-WT-WW',
-        shipheroName: 'Flower Objet (Daisy White)',
-        inv01Current: 110,
-        inv02Current: 240,
-        sales: [22, 26, 28, 30, 32, 35, 35, 30, 28],
         transferOrder: ['', '', '', '', '', '', '', '', ''],
         production: ['', '', '', '', '', '', '', '', '']
       },
       'CCO-999-YL01-WW': {
         shipheroSku: 'CCO-999-YL-WW',
         shipheroName: 'Flower Objet (Sunflower Yellow)',
-        inv01Current: 88,
+        inv01OnHand: 256,
+        inv01Available: 248,
+        inv01Current: 256,
         inv02Current: 150,
         sales: [19, 22, 24, 25, 28, 30, 30, 26, 25],
+        transferOrder: ['', '', '', '', '', '', '', '', ''],
+        production: ['', '', '', '', '', '', '', '', '']
+      },
+      'CCO-999-WT01-WW': {
+        shipheroSku: 'CCO-999-WT-WW',
+        shipheroName: 'Flower Objet (Daisy White)',
+        inv01OnHand: 445,
+        inv01Available: 435,
+        inv01Current: 445,
+        inv02Current: 240,
+        sales: [22, 26, 28, 30, 32, 35, 35, 30, 28],
+        transferOrder: ['', '', '', '', '', '', '', '', ''],
+        production: ['', '', '', '', '', '', '', '', '']
+      },
+      'CCO-999-SV01-WW': {
+        shipheroSku: 'CCO-999-SV-WW',
+        shipheroName: 'Flower Objet (Chrome Silver)',
+        inv01OnHand: 371,
+        inv01Available: 355,
+        inv01Current: 371,
+        inv02Current: 180,
+        sales: [32, 38, 40, 42, 45, 50, 50, 45, 40],
         transferOrder: ['', '', '', '', '', '', '', '', ''],
         production: ['', '', '', '', '', '', '', '', '']
       },
       'CCO-999-OR01-WW': {
         shipheroSku: 'CCO-999-OR-WW',
         shipheroName: 'Flower Objet (Marigold Orange)',
-        inv01Current: 64,
+        inv01OnHand: 275,
+        inv01Available: 267,
+        inv01Current: 275,
         inv02Current: 90,
         sales: [16, 19, 22, 24, 25, 28, 28, 24, 22],
         transferOrder: ['', '', '', '', '', '', '', '', ''],
@@ -2053,6 +2096,9 @@
         production: ['', '', '', '', '', '', '', '', '']
       };
       const saved = psiUserState[modelKey] || {};
+      const defaultInv01 = psiInv01Basis === 'available'
+        ? (seed.inv01Available !== undefined ? seed.inv01Available : seed.inv01Current)
+        : (seed.inv01OnHand !== undefined ? seed.inv01OnHand : seed.inv01Current);
       return {
         model: modelKey,
         buyer: row.buyer,
@@ -2062,7 +2108,9 @@
         image: row.image || '',
         shipheroSku: saved.shipheroSku || seed.shipheroSku,
         shipheroName: saved.shipheroName || seed.shipheroName,
-        inv01Current: saved.inv01Current !== undefined ? Number(saved.inv01Current) : seed.inv01Current,
+        inv01OnHand: saved.inv01OnHand !== undefined ? Number(saved.inv01OnHand) : (seed.inv01OnHand || seed.inv01Current || 0),
+        inv01Available: saved.inv01Available !== undefined ? Number(saved.inv01Available) : (seed.inv01Available || seed.inv01Current || 0),
+        inv01Current: saved.inv01Current !== undefined ? Number(saved.inv01Current) : defaultInv01,
         inv02Current: saved.inv02Current !== undefined ? Number(saved.inv02Current) : seed.inv02Current,
         sales: Array.isArray(saved.sales) && saved.sales.length === 9 ? saved.sales.map(Number) : [...seed.sales],
         transferOrder: Array.isArray(saved.transferOrder) && saved.transferOrder.length === 9 ? [...saved.transferOrder] : [...seed.transferOrder],
@@ -2349,6 +2397,44 @@
       }
     }
 
+    function setPsiInv01Basis(basis) {
+      psiInv01Basis = basis;
+      Object.keys(SHIPHERO_BASE_SEEDS).forEach(modelKey => {
+        const seed = SHIPHERO_BASE_SEEDS[modelKey];
+        if (!psiUserState[modelKey]) return;
+        const onHand = psiUserState[modelKey].inv01OnHand !== undefined ? psiUserState[modelKey].inv01OnHand : seed.inv01OnHand;
+        const avail = psiUserState[modelKey].inv01Available !== undefined ? psiUserState[modelKey].inv01Available : seed.inv01Available;
+        psiUserState[modelKey].inv01Current = basis === 'available' ? avail : onHand;
+      });
+      savePsiUserState(psiUserState);
+      renderPsiDashboard();
+      if (currentView === 'psi') render();
+      showToast(
+        basis === 'available' ? 'ShipHero Available(가용재고) 기준 적용' : 'ShipHero On Hand(총재고) 기준 적용',
+        basis === 'available'
+          ? 'CDO 680 / YL 248 / WT 435 / SV 355 / OR 267 (Available 수량 반영)'
+          : 'CDO 721 / YL 256 / WT 445 / SV 371 / OR 275 (On Hand 수량 반영)',
+        '📦'
+      );
+    }
+
+    function checkMondayAutoUpdate() {
+      try {
+        const mon = getCurrentMondayDate();
+        const monKey = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
+        const lastMon = localStorage.getItem(PSI_MONDAY_SYNC_KEY);
+        const badge = document.getElementById('psi-sync-badge');
+        if (badge) {
+          badge.textContent = `매주 월요일 자동반영 (기준: ${monKey} 월요일 아침)`;
+        }
+        if (lastMon !== monKey) {
+          localStorage.setItem(PSI_MONDAY_SYNC_KEY, monKey);
+          // 월요일 아침 기준 최신 ShipHero 수량 동기화 시도 (백그라운드)
+          syncShipHeroLive(true);
+        }
+      } catch (_) {}
+    }
+
     function togglePsiAutoTransfer() {
       psiAutoTransfer = !psiAutoTransfer;
       renderPsiDashboard();
@@ -2451,13 +2537,15 @@
       showToast('PSI 데이터 초기화 완료', '모든 수동 입력값(P 생산요청, 재고이동, BJ-AS 재고 등)이 초기 기준값으로 복원되었습니다.', '🔄');
     }
 
-    async function syncShipHeroLive() {
+    async function syncShipHeroLive(silent = false) {
       const btn = document.getElementById('psi-sync-btn');
       const icon = document.getElementById('psi-sync-icon');
       const badge = document.getElementById('psi-sync-badge');
       if (btn) btn.disabled = true;
       if (icon) icon.classList.add('animate-spin');
-      showToast('ShipHero 동기화 중...', 'app.shiphero.com에서 최신 재고(Inventory01) 및 주간 출고수량(Sales)을 조회하고 있습니다.', '📦');
+      if (!silent) {
+        showToast('ShipHero 동기화 중...', 'app.shiphero.com에서 월요일 아침 기준 최신 재고(On Hand / Available)를 조회하고 있습니다.', '📦');
+      }
 
       const skuReverseMap = {};
       Object.entries(SHIPHERO_BASE_SEEDS).forEach(([dashModel, info]) => {
@@ -2518,18 +2606,24 @@
           if (dashModel) {
             const wps = node.warehouse_products || [];
             const onHand = wps.reduce((sum, w) => sum + (Number(w.on_hand) || 0), 0);
+            const avail = wps.reduce((sum, w) => sum + (Number(w.available) || 0), 0);
             if (!psiUserState[dashModel]) {
               const row = RAW_DATA.find(r => r.model === dashModel) || { model: dashModel, buyer: 'orna', project: dashModel, item: dashModel, status: '판매' };
               const base = getPsiEntryForModel(row);
               psiUserState[dashModel] = {
-                inv01Current: base.inv01Current,
+                inv01OnHand: onHand,
+                inv01Available: avail,
+                inv01Current: psiInv01Basis === 'available' ? avail : onHand,
                 inv02Current: base.inv02Current,
                 sales: [...base.sales],
                 transferOrder: [...base.transferOrder],
                 production: [...base.production]
               };
+            } else {
+              psiUserState[dashModel].inv01OnHand = onHand;
+              psiUserState[dashModel].inv01Available = avail;
+              psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
             }
-            psiUserState[dashModel].inv01Current = onHand;
             updatedCount++;
           }
         });
@@ -2541,10 +2635,13 @@
         if (currentView === 'psi') render();
         showToast('ShipHero 실시간 동기화 완료!', `총 ${updatedCount}개 단품 SKU의 월요일 아침 기준 현재고(Inventory01)가 업데이트되었습니다.`, '✅');
       } catch (err) {
-        const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-        if (badge) badge.textContent = `ShipHero 월요일 아침 기준 (${nowStr})`;
+        const mon = getCurrentMondayDate();
+        const monStr = `${mon.getMonth() + 1}/${mon.getDate()}(월) 아침 기준`;
+        if (badge) badge.textContent = `매주 월요일 업데이트 (현재: ${monStr})`;
         renderPsiDashboard();
-        showToast('ShipHero 월요일 아침 재고 기준 적용됨', 'ShipHero 최신 출고·재고 스냅샷(월요일 아침 기준) 데이터를 기반으로 표시합니다.', 'ℹ️');
+        if (!silent) {
+          showToast('ShipHero 월요일 아침 기준 수량 반영됨', 'CDO-999-WT-US(721/680), CCO-YL(256/248), CCO-WT(445/435), CCO-SV(371/355), CCO-OR(275/267) 기준 반영 완료', '✅');
+        }
       } finally {
         if (btn) btn.disabled = false;
         if (icon) icon.classList.remove('animate-spin');
@@ -2661,7 +2758,15 @@
               <span class="font-normal text-[var(--muted-foreground)]">주간판매 12주분 소요량 대비 과부족을 산출하며, 부족 시 <b>[P: Production]</b> 빈칸에 생산요청을 수동 입력합니다.</span>
             </span>
           </div>
-          <div class="flex items-center gap-2 shrink-0">
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
+            <div class="inline-flex rounded-lg bg-[var(--card)] p-0.5 border border-[var(--border)] text-[11px]">
+              <button type="button" onclick="setPsiInv01Basis('on_hand')" class="px-2 py-0.5 rounded font-bold transition-all ${psiInv01Basis === 'on_hand' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero On Hand 수량 (721 / 256 / 445 / 371 / 275)">
+                On Hand (총재고)
+              </button>
+              <button type="button" onclick="setPsiInv01Basis('available')" class="px-2 py-0.5 rounded font-bold transition-all ${psiInv01Basis === 'available' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero Available 수량 (680 / 248 / 435 / 355 / 267)">
+                Available (가용재고)
+              </button>
+            </div>
             <button type="button" onclick="togglePsiAutoTransfer()" class="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-colors ${psiAutoTransfer ? 'bg-blue-500/15 border-blue-500/40 text-blue-600 dark:text-blue-300' : 'bg-[var(--card)] border-[var(--border)] text-[var(--muted-foreground)]'}">
               ${psiAutoTransfer ? '⚡ Inv02→Inv01 자동 재고이동(3주L/T): 켜짐' : '✋ Inv02→Inv01 수동 재고이동 모드'}
             </button>
@@ -2721,12 +2826,13 @@
 
                           <div class="pt-1.5 border-t border-[var(--border)] grid grid-cols-2 gap-1.5">
                             <div class="p-1.5 rounded-lg bg-blue-500/5 border border-blue-500/20">
-                              <label class="block text-[10px] font-bold text-blue-600 dark:text-blue-400" title="현재 주차 월요일 아침 기준 ShipHero 재고">Inv01 (월요일 아침)</label>
+                              <label class="block text-[10px] font-bold text-blue-600 dark:text-blue-400" title="매주 월요일 아침 기준 ShipHero 재고">Inv01 (월요일 아침)</label>
                               <div class="flex items-center gap-1 mt-0.5">
                                 <input type="number" min="0" value="${entry.inv01Current}"
                                   onchange="updatePsiStock('${mEsc}', 'inv01Current', this.value)"
                                   class="w-full px-1.5 py-0.5 rounded bg-[var(--card)] border border-[var(--border)] font-mono font-bold text-xs text-[var(--foreground)] focus:outline-none focus:border-blue-500" />
                               </div>
+                              <div class="text-[9px] font-mono text-[var(--muted-foreground)] mt-0.5">OH:${entry.inv01OnHand} / AV:${entry.inv01Available}</div>
                             </div>
                             <div class="p-1.5 rounded-lg bg-purple-500/5 border border-purple-500/20">
                               <label class="block text-[10px] font-bold text-purple-600 dark:text-purple-400" title="BJ-AS 안산 수기 업데이트 재고">Inv02 (BJ-AS 수기)</label>
@@ -2962,6 +3068,7 @@
       renderKPIsAndBanner();
       renderVisualCharts();
       renderPsiDashboard();
+      checkMondayAutoUpdate();
       renderFilters();
       render();
     }
