@@ -232,7 +232,7 @@
           <p class="text-xs text-[var(--muted-foreground)]">
             <b>P(Production)</b>: 빈칸 기본 (Inventory02 부족 시 수동 입력 · <b class="text-purple-500">입고 L/T 12주</b>) &nbsp;|&nbsp;
             <b>S(Sales)</b>: ShipHero 주간 출고수량 &nbsp;|&nbsp;
-            <b>Inventory01</b>: ShipHero 재고 (<b class="text-blue-500">입고 L/T 3주</b>) &nbsp;|&nbsp;
+            <b>Inventory01</b>: ShipHero 현재 재고 (<b class="text-blue-500">월요일 아침 기준 · 입고 L/T 3주</b>) &nbsp;|&nbsp;
             <b>Inventory02</b>: BJ-AS 재고 (수기 업데이트 · <b class="text-purple-500">생산 L/T 12주</b>)
           </p>
         </div>
@@ -1962,7 +1962,7 @@
     const PSI_WEEKS = [
       { idx: 0, offset: -2, code: '44W', dateRange: '10/26~11/01', tag: '과거 -2주', phase: 'past' },
       { idx: 1, offset: -1, code: '45W', dateRange: '11/02~11/08', tag: '과거 -1주', phase: 'past' },
-      { idx: 2, offset:  0, code: '46W', dateRange: '11/09~11/15', tag: '현재 주차', phase: 'current' },
+      { idx: 2, offset:  0, code: '46W', dateRange: '11/09(월) 아침', tag: '현재 (월요일 아침)', phase: 'current' },
       { idx: 3, offset:  1, code: '47W', dateRange: '11/16~11/22', tag: '미래 +1주', phase: 'future' },
       { idx: 4, offset:  2, code: '48W', dateRange: '11/23~11/29', tag: '미래 +2주', phase: 'future' },
       { idx: 5, offset:  3, code: '49W', dateRange: '11/30~12/06', tag: '미래 +3주 (Inv01 L/T 3주)', phase: 'future', isLt1Milestone: true },
@@ -2147,26 +2147,24 @@
         }
       }
 
-      // 현재 주차(idx=2, 46W) 기초재고는 entry.inv01Current / entry.inv02Current
-      // 과거 2주(idx=0, 1) 기말재고 역산:
-      // idx=1(45W) 기말재고 = 46W 기초재고 (inv01Current)
-      inv01[1] = entry.inv01Current - transfers[1] + inv01Inbound[1];
-      inv01[0] = inv01[1] + sales[1] - inv01Inbound[1];
+      // 각 주차(w)의 Inventory01 / Inventory02는 '월요일 아침 기준 현재고(기초재고)'를 표시합니다.
+      // 1) 현재 주차(idx=2, 46W 월요일 아침 기준 현재 재고) 그대로 반영
+      inv01[2] = entry.inv01Current;
+      inv02[2] = entry.inv02Current;
 
-      inv02[1] = entry.inv02Current;
-      inv02[0] = inv02[1] + transfers[1];
+      // 2) 과거 2주(idx=1: 45W 월요일 아침, idx=0: 44W 월요일 아침) 역산 복원
+      // 45W 월요일 아침 재고 - 45W 주간 출고(sales[1]) + 45W 입고 = 46W 월요일 아침 재고(inv01[2])
+      inv01[1] = inv01[2] + sales[1] - inv01Inbound[1];
+      inv01[0] = inv01[1] + sales[0] - inv01Inbound[0];
 
-      // 현재(idx=2) 및 미래 6주(idx=3..8) 순방향 계산
-      let cur01 = entry.inv01Current;
-      let cur02 = entry.inv02Current;
-      for (let w = 2; w < 9; w++) {
-        cur01 = cur01 - sales[w] + inv01Inbound[w];
-        // P(생산 요청)가 과거/현재에 입력된 경우 12주 L/T 경과 후 입고이나,
-        // 사용자가 특정 주차(미래)에 입고 예정이거나 긴급 생산요청 시 가시성을 위해
-        //BJ-AS 실재고(cur02)는 출하(transfers[w]) 차감, 총 파이프라인 재고(cur02 + 발주중 P)를 함께 추적
-        cur02 = cur02 - transfers[w];
-        inv01[w] = cur01;
-        inv02[w] = cur02;
+      inv02[1] = inv02[2] + transfers[1];
+      inv02[0] = inv02[1] + transfers[0];
+
+      // 3) 미래 6주(idx=3..8: 47W~52W 각 주차 월요일 아침 기준 예상 재고) 순방향 계산
+      // w주차 월요일 아침 재고 = (w-1)주차 월요일 아침 재고 - (w-1)주차 출고량 + w주차 입고량(3주 전 BJ-AS 출하분)
+      for (let w = 3; w < 9; w++) {
+        inv01[w] = inv01[w - 1] - sales[w - 1] + inv01Inbound[w];
+        inv02[w] = inv02[w - 1] - transfers[w - 1];
       }
 
       // 주간 평균 출고량 (미래 6주 평균 또는 전체 평균)
@@ -2659,7 +2657,7 @@
 
                           <div class="pt-1.5 border-t border-[var(--border)] grid grid-cols-2 gap-1.5">
                             <div class="p-1.5 rounded-lg bg-blue-500/5 border border-blue-500/20">
-                              <label class="block text-[10px] font-bold text-blue-600 dark:text-blue-400">Inv01 (ShipHero)</label>
+                              <label class="block text-[10px] font-bold text-blue-600 dark:text-blue-400" title="현재 주차 월요일 아침 기준 ShipHero 재고">Inv01 (월요일 아침)</label>
                               <div class="flex items-center gap-1 mt-0.5">
                                 <input type="number" min="0" value="${entry.inv01Current}"
                                   onchange="updatePsiStock('${mEsc}', 'inv01Current', this.value)"
@@ -2771,7 +2769,7 @@
                           <span class="font-bold text-blue-600 dark:text-blue-400">I : Inventory01</span>
                           <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-blue-500/15 text-blue-600 dark:text-blue-300">L/T 3주</span>
                         </div>
-                        <div class="text-[10px] text-[var(--muted-foreground)]">ShipHero 기말재고</div>
+                        <div class="text-[10px] text-[var(--muted-foreground)]">ShipHero 재고 (월요일 아침)</div>
                       </td>
                       ${PSI_WEEKS.map((wk, w) => {
                         const i01 = calc.inv01[w];
