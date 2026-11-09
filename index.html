@@ -230,10 +230,10 @@
             <span id="psi-sync-badge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)]">실시간 시뮬레이션 활성</span>
           </div>
           <p class="text-xs text-[var(--muted-foreground)]">
-            <b>P(Production)</b>: 빈칸 기본 (Inventory02 부족 시 수동 입력 · <b class="text-purple-500">입고 L/T 12주</b>) &nbsp;|&nbsp;
-            <b>S(Sales)</b>: ShipHero 주간 출고수량 &nbsp;|&nbsp;
-            <b>Inventory01</b>: ShipHero 현재 재고 (<b class="text-blue-500">월요일 아침 기준 · 입고 L/T 3주</b>) &nbsp;|&nbsp;
-            <b>Inventory02</b>: BJ-AS 재고 (수기 업데이트 · <b class="text-purple-500">생산 L/T 12주</b>)
+            <b>P</b>: 생산요청 (빈칸 수동입력) &nbsp;|&nbsp;
+            <b>S</b>: 주간 판매량(출고수량) &nbsp;|&nbsp;
+            <b>I_01 (ShipHero · US 3PL)</b>: 매주 월요일 업데이트 · <b class="text-blue-500">과부족 = I_01 - S (3주 LT)</b> &nbsp;|&nbsp;
+            <b>I_02 (BJ-AS · KR)</b>: 수기 입력 기준 고정 관리 · <b class="text-purple-500">과부족 = I_02 - I_01 - S (12주 LT)</b>
           </p>
         </div>
 
@@ -1946,23 +1946,22 @@
     }
 
     // =========================================================================
-    // PSI (Production - Sales - Inventory) 주간 수급 및 재고 부족/과잉 판정 엔진
-    // 1. CFO 재고 제외 (순수 단품 CDO / CCO 기준)
-    // 2. 타임라인: 과거 2주 (44W, 45W) + 현재 (46W 월요일 아침) + 미래 6주 (47W ~ 52W) = 총 9주
-    // 3. Inventory01 (ShipHero 재고, 월요일 아침 기준): 부족 시 Inventory02 재고를 이동 (입고 L/T = 3주)
-    // 4. Inventory02 (BJ-AS 재고, 수기 업데이트): 주간판매 상황에 맞춰 과부족 산출 및 L/T 12주 기준 정리
-    // 5. P (Production): 기본 빈칸(""), Inventory02(12주 L/T 기준) 부족 시 생산 요청 수량 수동 입력
+    // PSI (Production - Sales - Inventory) 주간 수급 및 재고 과부족 관리 엔진
+    // - 표시 기간: 과거 2주 (44W, 45W) + 현재 (46W) + 미래 6주 (47W ~ 52W) = 총 9주
+    // - 4개 행 구조: P (Production) / S (Sales) / I_01 (ShipHero) / I_02 (BJ-AS)
+    // - I_01 : ShipHero의 재고로 US 3PL에 위치, 매주 월요일 업데이트, 주간 판매량 기준 과부족 정리 (과부족 = I_01 - S), 3주 LT
+    // - I_02 : BJ-AS의 재고로 KR에 위치, 사용자 수기 입력 데이터 기준 고정 관리(자동 변경 금지), 주간 판매량 기준 과부족 정리 (과부족 = I_02 - I_01 - S), 12주 LT
     // =========================================================================
-    const PSI_LT_INV01 = 3;  // Inventory01 (ShipHero) 재고이동 입고 L/T: 3주
-    const PSI_LT_INV02 = 12; // Inventory02 (BJ-AS) 생산 입고 리드타임: 12주
-    const PSI_STORAGE_KEY = 'diofit_psi_state_v3';
+    const PSI_LT_INV01 = 3;  // I_01 (ShipHero) 리드타임: 3주 LT
+    const PSI_LT_INV02 = 12; // I_02 (BJ-AS) 리드타임: 12주 LT
+    const PSI_STORAGE_KEY = 'diofit_psi_state_v4';
+    const PSI_PREV_STORAGE_KEY = 'diofit_psi_state_v3';
     const PSI_MONDAY_SYNC_KEY = 'diofit_psi_last_monday_sync';
     let psiScope = 'shiphero'; // 'shiphero' | 'all'
-    let psiStatusFilter = 'ALL'; // 'ALL' | 'INV01_SHORT' | 'INV02_SHORT' | 'OPTIMAL' | 'EXCESS'
-    let psiAutoTransfer = true; // Inventory01 부족 시 Inventory02 -> Inventory01 자동 이동(3주 L/T) 시뮬레이션 여부
-    let psiInv01Basis = 'on_hand'; // 'on_hand' (총재고: 721/371/445/256/275) | 'available' (가용재고: 680/355/435/248/267)
+    let psiStatusFilter = 'ALL'; // 'ALL' | 'I01_SHORT' | 'I02_SHORT' | 'OPTIMAL'
+    let psiInv01Basis = 'on_hand'; // 'on_hand' (721/256/445/371/275) | 'available' (680/248/435/355/267)
 
-    // 매주 월요일 기준 동적 9주 타임라인 생성 (과거 2주 + 현재 월요일 아침 + 미래 6주)
+    // 매주 월요일 기준 동적 9주 타임라인 생성 (과거 2주 + 현재 + 미래 6주)
     function getIsoWeekNum(d) {
       const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
       const dayNum = date.getUTCDay() || 7;
@@ -1975,8 +1974,7 @@
       const now = new Date();
       const day = now.getDay();
       const diffToMon = day === 0 ? -6 : 1 - day;
-      const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMon);
-      return mon;
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMon);
     }
 
     function buildDynamicPsiWeeks() {
@@ -1985,52 +1983,35 @@
       const offsets = [-2, -1, 0, 1, 2, 3, 4, 5, 6];
       return offsets.map((off, idx) => {
         const wMon = new Date(baseMon.getFullYear(), baseMon.getMonth(), baseMon.getDate() + off * 7);
-        const wSun = new Date(wMon.getFullYear(), wMon.getMonth(), wMon.getDate() + 6);
         const wNum = getIsoWeekNum(wMon);
-        const code = `${wNum}W`;
-        const monStr = `${pad(wMon.getMonth() + 1)}/${pad(wMon.getDate())}`;
-        const sunStr = `${pad(wSun.getMonth() + 1)}/${pad(wSun.getDate())}`;
+        const code = `${wNum}w`;
+        const monStr = `${wMon.getMonth() + 1}/${wMon.getDate()}~`;
         if (off < 0) {
-          return { idx, offset: off, code, dateRange: `${monStr}~${sunStr}`, tag: `과거 ${off}주`, phase: 'past', weekNum: wNum };
+          return { idx, offset: off, code, dateRange: `(${monStr})`, tag: '과거 2주', phase: 'past', weekNum: wNum };
         } else if (off === 0) {
-          return { idx, offset: 0, code, dateRange: `${monStr}(월) 아침`, tag: '현재 (월요일 아침)', phase: 'current', weekNum: wNum };
+          return { idx, offset: 0, code, dateRange: `(${monStr})`, tag: '현재', phase: 'current', weekNum: wNum };
         } else if (off === 3) {
-          return { idx, offset: off, code, dateRange: `${monStr}~${sunStr}`, tag: '미래 +3주 (Inv01 L/T 3주)', phase: 'future', isLt1Milestone: true, weekNum: wNum };
+          return { idx, offset: off, code, dateRange: `(${monStr})`, tag: '미래 6주 (3주 LT)', phase: 'future', isLt1Milestone: true, weekNum: wNum };
         } else {
-          return { idx, offset: off, code, dateRange: `${monStr}~${sunStr}`, tag: `미래 +${off}주`, phase: 'future', weekNum: wNum };
+          return { idx, offset: off, code, dateRange: `(${monStr})`, tag: '미래 6주', phase: 'future', weekNum: wNum };
         }
       });
     }
 
     const PSI_WEEKS = buildDynamicPsiWeeks();
 
-    // ShipHero 연동 대상 단품 5종 (사용자 캡처 화면의 실제 ShipHero 수량 반영: On Hand / Available)
-    // - CDO-999-WT-US : On Hand 721 / Available 680
-    // - CCO-999-YL-WW : On Hand 256 / Available 248
-    // - CCO-999-WT-WW : On Hand 445 / Available 435
-    // - CCO-999-SV-WW : On Hand 371 / Available 355
-    // - CCO-999-OR-WW : On Hand 275 / Available 267
+    // ShipHero 단품 5종 기준 데이터
+    // - I_01: ShipHero 월요일 아침 재고 (On Hand: 721 / 445 / 256 / 275 / 371, Available: 680 / 435 / 248 / 267 / 355)
+    // - I_02: 사용자가 업데이트한 2,000개를 기본값으로 고정 관리 (절대 자동 변경하지 않음)
     const SHIPHERO_BASE_SEEDS = {
       'CDO-999-WT01-US': {
         shipheroSku: 'CDO-999-WT-US',
-        shipheroName: 'Objet Charger (US/Canada)',
+        shipheroName: 'Objet Charger - US(110V)',
         inv01OnHand: 721,
         inv01Available: 680,
-        inv01Current: 721, // 월요일 아침 기준 ShipHero 재고 (On Hand 721 / Available 680)
-        inv02Current: 850, // BJ-AS 안산 수기 재고
+        inv01Current: 721,
+        inv02Current: 2000, // 사용자 입력 데이터(2,000) 기준 고정 관리
         sales: [74, 82, 85, 90, 95, 110, 115, 100, 95],
-        transferOrder: ['', '', '', '', '', '', '', '', ''],
-        production: ['', '', '', '', '', '', '', '', '']
-      },
-      'CCO-999-YL01-WW': {
-        shipheroSku: 'CCO-999-YL-WW',
-        shipheroName: 'Flower Objet (Sunflower Yellow)',
-        inv01OnHand: 256,
-        inv01Available: 248,
-        inv01Current: 256,
-        inv02Current: 150,
-        sales: [19, 22, 24, 25, 28, 30, 30, 26, 25],
-        transferOrder: ['', '', '', '', '', '', '', '', ''],
         production: ['', '', '', '', '', '', '', '', '']
       },
       'CCO-999-WT01-WW': {
@@ -2039,20 +2020,18 @@
         inv01OnHand: 445,
         inv01Available: 435,
         inv01Current: 445,
-        inv02Current: 240,
+        inv02Current: 2000,
         sales: [22, 26, 28, 30, 32, 35, 35, 30, 28],
-        transferOrder: ['', '', '', '', '', '', '', '', ''],
         production: ['', '', '', '', '', '', '', '', '']
       },
-      'CCO-999-SV01-WW': {
-        shipheroSku: 'CCO-999-SV-WW',
-        shipheroName: 'Flower Objet (Chrome Silver)',
-        inv01OnHand: 371,
-        inv01Available: 355,
-        inv01Current: 371,
-        inv02Current: 180,
-        sales: [32, 38, 40, 42, 45, 50, 50, 45, 40],
-        transferOrder: ['', '', '', '', '', '', '', '', ''],
+      'CCO-999-YL01-WW': {
+        shipheroSku: 'CCO-999-YL-WW',
+        shipheroName: 'Flower Objet (Sunflower Yellow)',
+        inv01OnHand: 256,
+        inv01Available: 248,
+        inv01Current: 256,
+        inv02Current: 2000,
+        sales: [19, 22, 24, 25, 28, 30, 30, 26, 25],
         production: ['', '', '', '', '', '', '', '', '']
       },
       'CCO-999-OR01-WW': {
@@ -2061,17 +2040,33 @@
         inv01OnHand: 275,
         inv01Available: 267,
         inv01Current: 275,
-        inv02Current: 90,
+        inv02Current: 2000,
         sales: [16, 19, 22, 24, 25, 28, 28, 24, 22],
-        transferOrder: ['', '', '', '', '', '', '', '', ''],
+        production: ['', '', '', '', '', '', '', '', '']
+      },
+      'CCO-999-SV01-WW': {
+        shipheroSku: 'CCO-999-SV-WW',
+        shipheroName: 'Flower Objet (Chrome Silver)',
+        inv01OnHand: 371,
+        inv01Available: 355,
+        inv01Current: 371,
+        inv02Current: 2000,
+        sales: [32, 38, 40, 42, 45, 50, 50, 45, 40],
         production: ['', '', '', '', '', '', '', '', '']
       }
     };
 
     function loadPsiUserState() {
       try {
-        const raw = localStorage.getItem(PSI_STORAGE_KEY);
-        if (raw) return JSON.parse(raw);
+        const rawV4 = localStorage.getItem(PSI_STORAGE_KEY);
+        if (rawV4) return JSON.parse(rawV4);
+        // 이전 버전(v3)에 사용자가 입력한 I_02, I_01, P, S 데이터가 있으면 그대로 승계!
+        const rawV3 = localStorage.getItem(PSI_PREV_STORAGE_KEY);
+        if (rawV3) {
+          const parsed = JSON.parse(rawV3);
+          localStorage.setItem(PSI_STORAGE_KEY, JSON.stringify(parsed));
+          return parsed;
+        }
       } catch (_) {}
       return {};
     }
@@ -2089,10 +2084,11 @@
       const seed = SHIPHERO_BASE_SEEDS[modelKey] || {
         shipheroSku: modelKey,
         shipheroName: `${row.project} (${row.item})`,
+        inv01OnHand: row.status === '판매' ? 180 : 0,
+        inv01Available: row.status === '판매' ? 180 : 0,
         inv01Current: row.status === '판매' ? 180 : 0,
-        inv02Current: row.status === '판매' ? 400 : 0,
+        inv02Current: 2000,
         sales: row.status === '판매' ? [20, 22, 25, 25, 25, 25, 25, 25, 25] : [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        transferOrder: ['', '', '', '', '', '', '', '', ''],
         production: ['', '', '', '', '', '', '', '', '']
       };
       const saved = psiUserState[modelKey] || {};
@@ -2111,44 +2107,41 @@
         inv01OnHand: saved.inv01OnHand !== undefined ? Number(saved.inv01OnHand) : (seed.inv01OnHand || seed.inv01Current || 0),
         inv01Available: saved.inv01Available !== undefined ? Number(saved.inv01Available) : (seed.inv01Available || seed.inv01Current || 0),
         inv01Current: saved.inv01Current !== undefined ? Number(saved.inv01Current) : defaultInv01,
+        // I_02는 사용자가 입력한 값을 절대 변경하지 않고 그대로 사용 (기본 시드 2,000)
         inv02Current: saved.inv02Current !== undefined ? Number(saved.inv02Current) : seed.inv02Current,
         sales: Array.isArray(saved.sales) && saved.sales.length === 9 ? saved.sales.map(Number) : [...seed.sales],
-        transferOrder: Array.isArray(saved.transferOrder) && saved.transferOrder.length === 9 ? [...saved.transferOrder] : [...seed.transferOrder],
         production: Array.isArray(saved.production) && saved.production.length === 9 ? [...saved.production] : [...seed.production]
       };
     }
 
     /**
-     * 주차별 PSI 수급 및 과부족 계산
-     * 1. Inventory01 (ShipHero, 월요일 아침 기준 재고, L/T = 3주):
-     *    - idx=2(46W 현재) = entry.inv01Current (월요일 아침 기준 현재고)
-     *    - Inventory01이 부족해질 경우(3주 뒤인 w+3 주차에 재고가 해당 주 판매량 미만이거나 결품 예상 시),
-     *      w주차에 Inventory02(BJ-AS)에서 재고를 이동(transfer)시키며, 이동된 재고는 3주 뒤(w+3) Inventory01에 입고됨.
-     *    - 각 주차별 Inv01 과부족(L/T 3주 기준) = 해당 주차 Inv01 재고 - 향후 3주간(w, w+1, w+2) 주간판매 합계
-     * 2. Inventory02 (BJ-AS 수기 재고, 주간판매 상황 연동 & L/T = 12주 기준 과부족 정리):
-     *    - idx=2(46W 현재) = entry.inv02Current
-     *    - 매주 Inv01 보충을 위한 재고 이동(또는 주간판매 소진분)만큼 차감
-     *    - 각 주차별 Inv02 과부족(L/T 12주 기준) = 주간판매 상황(향후 12주 판매 소요량 = 주간판매 × 12주 기준) 대비
-     *      현재 가용 재고(Inv02 + Inv01 잔여분 + P 생산요청 누적분)의 과부족을 산출하여 표시
+     * 첨부 이미지 기준 PSI 과부족 공식 계산
+     * 1. I_01 (ShipHero 재고, US 3PL, 3주 LT):
+     *    - 현재 주차(idx=2, 46w) 기초 재고 = entry.inv01Current (월요일 아침 기준)
+     *    - 과거 2주(44w, 45w) 재고 역산: I_01[1] = I_01[2] + S[1], I_01[0] = I_01[1] + S[0]
+     *    - 미래 6주(47w~52w) 재고 차감: I_01[w] = I_01[w-1] - S[w-1]
+     *    - 주간 판매량 기준 과부족 공식: [ 과부족 = I_01 - S ] (즉, 각 주차 w의 I_01[w] - S[w])
+     * 2. I_02 (BJ-AS 재고, KR, 12주 LT):
+     *    - I_02 재고 수량은 자동 변경 금지! 사용자가 입력한 데이터(entry.inv02Current, 예: 2,000) 그대로 고정 표시
+     *    - 주간 판매량 기준 과부족 공식: [ 과부족 = I_02 - I_01 - S ] (즉, 각 주차 w의 I_02[w] - I_01[w] - S[w])
      */
     function calculatePsiProjection(entry) {
       const sales = entry.sales.map(v => Math.max(0, Number(v) || 0));
-      const manualTransfers = entry.transferOrder.map(v => (v === '' || v === null || v === undefined) ? null : Math.max(0, Number(v) || 0));
       const prods = entry.production.map(v => (v === '' || v === null || v === undefined) ? 0 : Math.max(0, Number(v) || 0));
 
       const inv01 = new Array(9).fill(0);
       const inv02 = new Array(9).fill(0);
-      const effectiveTransfers = new Array(9).fill(0); // 실제 적용된 Inv02 -> Inv01 이동 수량 (w주차 출발 -> w+3주차 도착)
-      const isAutoTransferWeek = new Array(9).fill(false);
-      const inv01Inbound = new Array(9).fill(0); // w주차에 ShipHero(Inv01)로 도착하는 수량 (= effectiveTransfers[w - 3])
+      const i01Diff = new Array(9).fill(0); // 과부족 = I_01 - S
+      const i02Diff = new Array(9).fill(0); // 과부족 = I_02 - I_01 - S
+      const inv01WeekStatus = new Array(9).fill(null);
+      const inv02WeekStatus = new Array(9).fill(null);
       const inv02ProdSchedule = [];
 
-      // P(Production) 입력 스케줄 정리 (L/T 12주)
       for (let w = 0; w < 9; w++) {
         if (prods[w] > 0) {
-          const reqWeekNum = 44 + w;
+          const reqWeekNum = (PSI_WEEKS[w] ? PSI_WEEKS[w].weekNum : (44 + w));
           const arrWeekNum = reqWeekNum + PSI_LT_INV02;
-          const arrYearPrefix = arrWeekNum > 52 ? `27년 ${arrWeekNum - 52}W` : `${arrWeekNum}W`;
+          const arrYearPrefix = arrWeekNum > 52 ? `27년 ${arrWeekNum - 52}w` : `${arrWeekNum}w`;
           inv02ProdSchedule.push({
             wIdx: w,
             reqCode: PSI_WEEKS[w].code,
@@ -2158,130 +2151,61 @@
         }
       }
 
-      // 1) 현재 주차(idx=2, 46W 월요일 아침 기준 현재 재고)
+      // 1) I_01 주차별 재고 산출 (현재 46w = 월요일 아침 재고)
       inv01[2] = entry.inv01Current;
-      inv02[2] = entry.inv02Current;
-
-      // 과거 주차(0, 1) 수동 이동분 반영
-      for (let w = 0; w < 2; w++) {
-        if (manualTransfers[w] !== null && manualTransfers[w] > 0) {
-          effectiveTransfers[w] = manualTransfers[w];
-          if (w + PSI_LT_INV01 < 9) {
-            inv01Inbound[w + PSI_LT_INV01] += effectiveTransfers[w];
-          }
-        }
+      inv01[1] = inv01[2] + sales[1];
+      inv01[0] = inv01[1] + sales[0];
+      for (let w = 3; w < 9; w++) {
+        inv01[w] = inv01[w - 1] - sales[w - 1];
       }
 
-      // 2) 과거 2주(idx=1: 45W 월요일 아침, idx=0: 44W 월요일 아침) 역산
-      inv01[1] = inv01[2] + sales[1] - inv01Inbound[2];
-      inv01[0] = inv01[1] + sales[0] - inv01Inbound[1];
-
-      inv02[1] = inv02[2] + effectiveTransfers[1];
-      inv02[0] = inv02[1] + effectiveTransfers[0];
-
-      // 3) 현재(w=2) ~ 미래(w=8) 순차 계산 및 L/T 3주 기준 Inv02 -> Inv01 재고 이동 반영
-      for (let w = 2; w < 9; w++) {
-        if (w > 2) {
-          inv01[w] = inv01[w - 1] - sales[w - 1] + inv01Inbound[w];
-          inv02[w] = inv02[w - 1] - effectiveTransfers[w - 1];
-        }
-
-        // w주차에서 3주 뒤(targetW = w + 3)의 Inv01 예상 재고를 점검하여 부족 시 w주차에 Inv02 -> Inv01 이동!
-        const targetW = w + PSI_LT_INV01;
-        if (manualTransfers[w] !== null) {
-          effectiveTransfers[w] = manualTransfers[w];
-        } else if (psiAutoTransfer && targetW < 9) {
-          // w주차부터 targetW(w+3)까지 출고 후 예상되는 targetW 월요일 아침 재고 계산
-          let proj01AtTarget = inv01[w];
-          for (let k = w; k < targetW; k++) {
-            proj01AtTarget -= sales[k];
-            if (k + 1 < targetW) {
-              proj01AtTarget += inv01Inbound[k + 1];
-            }
-          }
-          proj01AtTarget += inv01Inbound[targetW];
-
-          // targetW 주차에 최소 해당 주 판매량(sales[targetW]) + 차주 안전버퍼(0.5주) 확보를 위해 부족분 산출
-          const minRequiredAtTarget = sales[targetW];
-          if (proj01AtTarget < minRequiredAtTarget) {
-            const needed = minRequiredAtTarget - proj01AtTarget;
-            // 10단위 올림으로 깔끔하게 이동 수량 산출 (단, BJ-AS 가용재고 범위 내 또는 필요량 표시)
-            const roundedNeed = Math.ceil(needed / 10) * 10;
-            const avail02 = Math.max(0, inv02[w]);
-            effectiveTransfers[w] = avail02 > 0 ? Math.min(avail02, roundedNeed) : roundedNeed;
-            isAutoTransferWeek[w] = effectiveTransfers[w] > 0;
-          }
-        }
-
-        if (effectiveTransfers[w] > 0 && targetW < 9) {
-          inv01Inbound[targetW] += effectiveTransfers[w];
-        }
-      }
-
-      // 4) 주차별 과부족 산출:
-      // - Inv01 과부족 (L/T 3주 기준): w주차 Inv01 재고 - 향후 3주간(w, w+1, w+2) 판매량 합계
-      // - Inv02 과부족 (L/T 12주 기준, 주간판매 상황 연동):
-      //   w주차 시점의 향후 12주간 예상 판매량(주간판매 12주분) 대비 (w주차 Inv02 + Inv01 잔여 + w주차까지 누적 P 생산요청)의 과부족
-      const inv01Lt3Diff = new Array(9).fill(0);
-      const inv01WeekStatus = new Array(9).fill(null);
-
-      const inv02Lt12Req = new Array(9).fill(0);
-      const inv02Lt12Diff = new Array(9).fill(0);
-      const inv02WeekStatus = new Array(9).fill(null);
-
-      let cumProd = 0;
+      // 2) I_02 주차별 재고: 사용자 입력 데이터(entry.inv02Current) 기준 고정 (절대 자동 차감/변경하지 않음)
       for (let w = 0; w < 9; w++) {
-        cumProd += prods[w];
+        inv02[w] = entry.inv02Current;
+      }
 
-        // 향후 3주간(L/T 3주) 판매 소요량
-        let sales3w = 0;
-        for (let k = 0; k < PSI_LT_INV01; k++) {
-          const idx = Math.min(8, w + k);
-          sales3w += sales[idx];
-        }
-        inv01Lt3Diff[w] = inv01[w] - sales3w;
+      // 3) 첨부 이미지 공식에 따른 주차별 과부족 산출
+      //    - I_01 과부족 = I_01 - S
+      //    - I_02 과부족 = I_02 - I_01 - S
+      for (let w = 0; w < 9; w++) {
+        const d01 = inv01[w] - sales[w];
+        const d02 = inv02[w] - inv01[w] - sales[w];
+        i01Diff[w] = d01;
+        i02Diff[w] = d02;
 
-        if (inv01[w] < 0) {
-          inv01WeekStatus[w] = { code: 'STOCKOUT', label: '결품', cls: 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/40' };
-        } else if (inv01Lt3Diff[w] < 0) {
-          inv01WeekStatus[w] = { code: 'SHORTAGE', label: `3주LT 부족(${inv01Lt3Diff[w]})`, cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30' };
-        } else if (sales3w > 0 && inv01[w] > sales3w * 3.5) {
-          inv01WeekStatus[w] = { code: 'EXCESS', label: `과잉(+${inv01Lt3Diff[w]})`, cls: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30' };
-        } else {
-          inv01WeekStatus[w] = { code: 'OPTIMAL', label: `적정(+${inv01Lt3Diff[w]})`, cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' };
-        }
-
-        // 향후 12주간(L/T 12주) 주간판매 상황 기준 필요량
-        // w주차의 주간판매 추세(w주차부터 가용한 미래 주간판매 + 마지막 주차 추세 연장)를 12주간 합산
-        let sales12w = 0;
-        for (let k = 0; k < PSI_LT_INV02; k++) {
-          const idx = Math.min(8, w + k);
-          sales12w += sales[idx];
-        }
-        inv02Lt12Req[w] = sales12w;
-
-        // w주차 기준 총 가용재고(Inv01[w] + Inv02[w] + 누적 생산요청 cumProd)와 12주 판매 소요량(sales12w) 비교
-        // 즉, Inv01에서 소화하고 부족한 물량은 Inv02에서 이동시켜야 하므로, 12주 L/T 동안 주간판매를 감당하기 위한 Inv02의 실질 과부족은:
-        const totalSupplyAtW = inv01[w] + inv02[w] + cumProd;
-        inv02Lt12Diff[w] = totalSupplyAtW - sales12w;
-
-        if (inv02[w] < 0 || inv02Lt12Diff[w] < 0) {
-          inv02WeekStatus[w] = {
-            code: 'PROD_NEEDED',
-            label: `12주LT 부족(${inv02Lt12Diff[w]})`,
+        const sign01 = d01 >= 0 ? `+${d01.toLocaleString()}` : `${d01.toLocaleString()}`;
+        if (d01 < 0) {
+          inv01WeekStatus[w] = {
+            code: 'SHORTAGE',
+            label: `부족(${sign01})`,
             cls: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
           };
-        } else if (sales12w > 0 && inv02Lt12Diff[w] > sales12w * 0.5) {
+        } else if (d01 < sales[w] * PSI_LT_INV01) {
+          inv01WeekStatus[w] = {
+            code: 'LOW_3W',
+            label: `과부족(${sign01})`,
+            cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+          };
+        } else {
+          inv01WeekStatus[w] = {
+            code: 'OPTIMAL',
+            label: `과부족(${sign01})`,
+            cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+          };
+        }
+
+        const sign02 = d02 >= 0 ? `+${d02.toLocaleString()}` : `${d02.toLocaleString()}`;
+        if (d02 < 0) {
           inv02WeekStatus[w] = {
-            code: 'EXCESS',
-            label: `12주LT 과잉(+${inv02Lt12Diff[w]})`,
-            cls: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30'
+            code: 'SHORTAGE',
+            label: `부족(${sign02})`,
+            cls: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
           };
         } else {
           inv02WeekStatus[w] = {
             code: 'OPTIMAL',
-            label: `12주LT 적정(+${inv02Lt12Diff[w]})`,
-            cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+            label: `과부족(${sign02})`,
+            cls: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30'
           };
         }
       }
@@ -2292,95 +2216,83 @@
       const totalCombinedStock = entry.inv01Current + entry.inv02Current;
       const totalWos = avgWeeklySales > 0 ? (totalCombinedStock / avgWeeklySales) : 99;
 
-      // 현재 주차(w=2, 46W) 및 6주 후(w=8, 52W) 기준 대표 과부족 수치
-      const currInv01Diff3w = inv01Lt3Diff[2];
-      const minInv01Diff3w = Math.min(...inv01Lt3Diff.slice(2));
-      const currInv02Diff12w = inv02Lt12Diff[2];
-      const endInv02Diff12w = inv02Lt12Diff[8];
+      // 현재(46w) 및 미래(47w~52w) 과부족 체크
+      const minFutureI01Diff = Math.min(...i01Diff.slice(2));
+      const minFutureI02Diff = Math.min(...i02Diff.slice(2));
+      const currI01Diff = i01Diff[2];
+      const currI02Diff = i02Diff[2];
 
-      // 3주 L/T 기준: 6주 내 Inv01 부족분(추가 이동 필요량)
-      const totalPlannedTransfer = effectiveTransfers.slice(2).reduce((a, b) => a + b, 0);
-      const requiredFor6Weeks01 = Math.ceil(futureSalesSum + avgWeeklySales);
-      const inv01TransferNeedQty = Math.max(0, requiredFor6Weeks01 - (entry.inv01Current + totalPlannedTransfer));
-
-      // 12주 L/T 기준: 현재(46W) 주간판매 추세(12주분 = inv02Lt12Req[2]) 대비 부족분 -> P(Production) 입력 권장량
-      const inv02ShortageQty = Math.max(0, -currInv02Diff12w);
-      const needsProduction = inv02ShortageQty > 0;
-      const needsInv01Transfer = minInv01Diff3w < 0;
+      const hasI01Shortage = minFutureI01Diff < 0;
+      const hasI02Shortage = minFutureI02Diff < 0;
 
       let overallStatus = {
         code: 'OPTIMAL',
-        badge: '🟢 Inv01·02 적정',
+        badge: '🟢 I_01 · I_02 안정',
         badgeCls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30',
-        actionMsg: `Inv01(3주L/T) 및 Inv02(12주L/T 과부족 +${currInv02Diff12w}개) 모두 안정권입니다.`
+        actionMsg: `현재(46w) I_01 과부족(${currI01Diff >= 0 ? '+' : ''}${currI01Diff.toLocaleString()}) · I_02 과부족(${currI02Diff >= 0 ? '+' : ''}${currI02Diff.toLocaleString()})`
       };
 
-      if (needsProduction && needsInv01Transfer) {
+      if (hasI01Shortage && hasI02Shortage) {
         overallStatus = {
-          code: 'INV01_SHORT',
-          badge: '🔴 Inv01 이동 + 🟣 P 생산요청 필요',
+          code: 'I01_SHORT',
+          badge: '🔴 I_01 및 I_02 부족 예상',
           badgeCls: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30',
-          actionMsg: `1) Inv01 부족 대비 Inv02 재고이동(3주L/T) 진행  2) Inv02 12주L/T 기준 ${inv02ShortageQty}개 부족 → P(생산요청) 입력 필요`
+          actionMsg: `미래 6주 내 I_01 과부족(${minFutureI01Diff.toLocaleString()}) 및 I_02 과부족(${minFutureI02Diff.toLocaleString()}) 부족 발생 — 3주/12주 LT 발주 필요`
         };
-      } else if (needsProduction) {
+      } else if (hasI01Shortage) {
         overallStatus = {
-          code: 'INV02_SHORT',
-          badge: '🟣 Inv02 부족 → P 생산요청 (L/T 12주)',
-          badgeCls: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30',
-          actionMsg: `주간판매 연동 12주 L/T 기준 현재 ${inv02ShortageQty}개 부족 (52W 기준 ${Math.abs(endInv02Diff12w)}개 부족). P(Production)에 생산요청을 입력하세요.`
-        };
-      } else if (needsInv01Transfer) {
-        overallStatus = {
-          code: 'INV01_SHORT',
-          badge: '🟠 Inv01 부족 → Inv02 재고이동 (L/T 3주)',
+          code: 'I01_SHORT',
+          badge: '🟠 I_01 부족 예상 (3주 LT 이동 필요)',
           badgeCls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30',
-          actionMsg: `3주 L/T 기준 Inv01 재고 보충 필요. Inv02(BJ-AS) 재고를 이동시켜 3주 뒤 입고되도록 설정합니다.`
+          actionMsg: `미래 6주 내 I_01 과부족(${minFutureI01Diff.toLocaleString()}) 발생 예상 (3주 LT 기준 I_02→I_01 보충 필요)`
         };
-      } else if (currInv02Diff12w > inv02Lt12Req[2] * 0.5) {
+      } else if (hasI02Shortage) {
         overallStatus = {
-          code: 'EXCESS',
-          badge: '🔵 재고 과잉 (>12주 L/T)',
-          badgeCls: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30',
-          actionMsg: `12주 L/T 주간판매 소요량 대비 +${currInv02Diff12w}개 과잉 보유 중 (프로모션 권장)`
+          code: 'I02_SHORT',
+          badge: '🟣 I_02 과부족 마이너스 (12주 LT 발주)',
+          badgeCls: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30',
+          actionMsg: `I_02 과부족(I_02-I_01-S = ${minFutureI02Diff.toLocaleString()}) 기준 생산 발주(P, 12주 LT) 검토 필요`
         };
       }
 
       return {
         sales,
-        effectiveTransfers,
-        isAutoTransferWeek,
         prods,
         inv01,
         inv02,
-        inv01Inbound,
-        inv02ProdSchedule,
-        inv01Lt3Diff,
+        i01Diff,
+        i02Diff,
         inv01WeekStatus,
-        inv02Lt12Req,
-        inv02Lt12Diff,
         inv02WeekStatus,
+        inv02ProdSchedule,
         avgWeeklySales,
         wosCurrent01,
         totalWos,
-        needsProduction,
-        needsInv01Transfer,
-        inv02ShortageQty,
-        inv01TransferNeedQty,
-        currInv02Diff12w,
-        endInv02Diff12w,
+        hasI01Shortage,
+        hasI02Shortage,
+        currI01Diff,
+        currI02Diff,
         overallStatus
       };
     }
 
     function getPsiTargetRows() {
       const shipheroSet = new Set(Object.keys(SHIPHERO_BASE_SEEDS));
-      return RAW_DATA.filter(r => {
-        // 1. CFO 모델은 PSI 재고 대상에서 제외
+      const orderKeys = Object.keys(SHIPHERO_BASE_SEEDS);
+      const filtered = RAW_DATA.filter(r => {
         if (String(r.model || '').toUpperCase().startsWith('CFO')) return false;
         if (psiScope === 'shiphero') {
           return shipheroSet.has(r.model);
         }
         return r.status === '판매' || shipheroSet.has(r.model);
+      });
+      return filtered.sort((a, b) => {
+        const ia = orderKeys.indexOf(a.model);
+        const ib = orderKeys.indexOf(b.model);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+        return a.no - b.no;
       });
     }
 
@@ -2401,19 +2313,31 @@
       psiInv01Basis = basis;
       Object.keys(SHIPHERO_BASE_SEEDS).forEach(modelKey => {
         const seed = SHIPHERO_BASE_SEEDS[modelKey];
-        if (!psiUserState[modelKey]) return;
-        const onHand = psiUserState[modelKey].inv01OnHand !== undefined ? psiUserState[modelKey].inv01OnHand : seed.inv01OnHand;
-        const avail = psiUserState[modelKey].inv01Available !== undefined ? psiUserState[modelKey].inv01Available : seed.inv01Available;
-        psiUserState[modelKey].inv01Current = basis === 'available' ? avail : onHand;
+        if (!psiUserState[modelKey]) {
+          const row = RAW_DATA.find(r => r.model === modelKey) || { model: modelKey, buyer: 'orna', project: modelKey, item: modelKey, status: '판매' };
+          const base = getPsiEntryForModel(row);
+          psiUserState[modelKey] = {
+            inv01OnHand: base.inv01OnHand,
+            inv01Available: base.inv01Available,
+            inv01Current: basis === 'available' ? base.inv01Available : base.inv01OnHand,
+            inv02Current: base.inv02Current, // I_02는 절대 변경하지 않음
+            sales: [...base.sales],
+            production: [...base.production]
+          };
+        } else {
+          const onHand = psiUserState[modelKey].inv01OnHand !== undefined ? psiUserState[modelKey].inv01OnHand : seed.inv01OnHand;
+          const avail = psiUserState[modelKey].inv01Available !== undefined ? psiUserState[modelKey].inv01Available : seed.inv01Available;
+          psiUserState[modelKey].inv01Current = basis === 'available' ? avail : onHand;
+        }
       });
       savePsiUserState(psiUserState);
       renderPsiDashboard();
       if (currentView === 'psi') render();
       showToast(
-        basis === 'available' ? 'ShipHero Available(가용재고) 기준 적용' : 'ShipHero On Hand(총재고) 기준 적용',
+        basis === 'available' ? 'I_01: ShipHero Available(가용재고) 반영' : 'I_01: ShipHero On Hand(총재고) 반영',
         basis === 'available'
-          ? 'CDO 680 / YL 248 / WT 435 / SV 355 / OR 267 (Available 수량 반영)'
-          : 'CDO 721 / YL 256 / WT 445 / SV 371 / OR 275 (On Hand 수량 반영)',
+          ? 'I_01만 업데이트됨 (CDO 680 / WT 435 / YL 248 / OR 267 / SV 355) · I_02는 현재 입력값 유지'
+          : 'I_01만 업데이트됨 (CDO 721 / WT 445 / YL 256 / OR 275 / SV 371) · I_02는 현재 입력값 유지',
         '📦'
       );
     }
@@ -2425,27 +2349,13 @@
         const lastMon = localStorage.getItem(PSI_MONDAY_SYNC_KEY);
         const badge = document.getElementById('psi-sync-badge');
         if (badge) {
-          badge.textContent = `매주 월요일 자동반영 (기준: ${monKey} 월요일 아침)`;
+          badge.textContent = `매주 월요일 I_01 업데이트 (기준: ${monKey})`;
         }
         if (lastMon !== monKey) {
           localStorage.setItem(PSI_MONDAY_SYNC_KEY, monKey);
-          // 월요일 아침 기준 최신 ShipHero 수량 동기화 시도 (백그라운드)
           syncShipHeroLive(true);
         }
       } catch (_) {}
-    }
-
-    function togglePsiAutoTransfer() {
-      psiAutoTransfer = !psiAutoTransfer;
-      renderPsiDashboard();
-      if (currentView === 'psi') render();
-      showToast(
-        psiAutoTransfer ? 'Inv02 → Inv01 자동 재고이동(3주 L/T) 켜짐' : '수동 재고이동 모드 전환',
-        psiAutoTransfer
-          ? 'Inventory01 부족 예상 시 3주 전에 Inventory02 재고를 자동으로 이동시킵니다.'
-          : '직접 입력한 재고이동 수량만 반영합니다.',
-        '🚢'
-      );
     }
 
     function setPsiScope(scope) {
@@ -2476,10 +2386,11 @@
         const row = RAW_DATA.find(r => r.model === model) || { model, buyer: 'orna', project: model, item: model, status: '판매' };
         const base = getPsiEntryForModel(row);
         psiUserState[model] = {
+          inv01OnHand: base.inv01OnHand,
+          inv01Available: base.inv01Available,
           inv01Current: base.inv01Current,
           inv02Current: base.inv02Current,
           sales: [...base.sales],
-          transferOrder: [...base.transferOrder],
           production: [...base.production]
         };
       }
@@ -2497,10 +2408,11 @@
         const row = RAW_DATA.find(r => r.model === model) || { model, buyer: 'orna', project: model, item: model, status: '판매' };
         const base = getPsiEntryForModel(row);
         psiUserState[model] = {
+          inv01OnHand: base.inv01OnHand,
+          inv01Available: base.inv01Available,
           inv01Current: base.inv01Current,
           inv02Current: base.inv02Current,
           sales: [...base.sales],
-          transferOrder: [...base.transferOrder],
           production: [...base.production]
         };
       }
@@ -2518,25 +2430,33 @@
       }
     }
 
-    function applyRecommendedOrder(model, type, qty) {
-      if (!qty || qty <= 0) return;
-      if (type === 'transfer') {
-        updatePsiWeeklyCell(model, 'transferOrder', 2, String(qty));
-        showToast('Inv02 → Inv01 재고이동(3주 L/T) 반영', `${model}: 46W에 Inventory02에서 ${qty}개 이동 출발 → 3주 뒤(49W) Inventory01에 입고 반영되었습니다.`, '🚢');
-      } else if (type === 'production') {
-        updatePsiWeeklyCell(model, 'production', 2, String(qty));
-        showToast('P(Production) 생산요청(12주 L/T) 입력', `${model}: 46W에 생산요청 ${qty}개 수동 입력 완료 (12주 L/T 기준 과부족 즉시 반영 · 27년 6W 입고)`, '🏭');
-      }
-    }
-
+    /**
+     * 초기화 버튼 클릭 시에도 사용자가 입력한 I_02 재고는 절대 건드리지 않고 P(생산요청) 등만 초기화
+     */
     function resetPsiOverrides() {
-      psiUserState = {};
-      try { localStorage.removeItem(PSI_STORAGE_KEY); } catch (_) {}
+      Object.keys(SHIPHERO_BASE_SEEDS).forEach(modelKey => {
+        const seed = SHIPHERO_BASE_SEEDS[modelKey];
+        const preservedInv02 = (psiUserState[modelKey] && psiUserState[modelKey].inv02Current !== undefined)
+          ? psiUserState[modelKey].inv02Current
+          : seed.inv02Current;
+        psiUserState[modelKey] = {
+          inv01OnHand: seed.inv01OnHand,
+          inv01Available: seed.inv01Available,
+          inv01Current: psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand,
+          inv02Current: preservedInv02, // I_02 변경 금지!
+          sales: [...seed.sales],
+          production: ['', '', '', '', '', '', '', '', '']
+        };
+      });
+      savePsiUserState(psiUserState);
       renderPsiDashboard();
       if (currentView === 'psi') render();
-      showToast('PSI 데이터 초기화 완료', '모든 수동 입력값(P 생산요청, 재고이동, BJ-AS 재고 등)이 초기 기준값으로 복원되었습니다.', '🔄');
+      showToast('P(생산요청) 초기화 및 I_01 월요일 재고 복원', 'I_02(BJ-AS) 재고는 현재 입력된 데이터를 그대로 유지했습니다.', '🔄');
     }
 
+    /**
+     * 매주 월요일 ShipHero 동기화: 오직 I_01 재고만 ShipHero에서 업데이트하며, I_02 재고는 절대 변경하지 않음
+     */
     async function syncShipHeroLive(silent = false) {
       const btn = document.getElementById('psi-sync-btn');
       const icon = document.getElementById('psi-sync-icon');
@@ -2544,7 +2464,7 @@
       if (btn) btn.disabled = true;
       if (icon) icon.classList.add('animate-spin');
       if (!silent) {
-        showToast('ShipHero 동기화 중...', 'app.shiphero.com에서 월요일 아침 기준 최신 재고(On Hand / Available)를 조회하고 있습니다.', '📦');
+        showToast('ShipHero I_01 동기화 중...', 'I_02 재고는 유지하고, I_01(ShipHero) 월요일 재고만 업데이트합니다.', '📦');
       }
 
       const skuReverseMap = {};
@@ -2614,15 +2534,15 @@
                 inv01OnHand: onHand,
                 inv01Available: avail,
                 inv01Current: psiInv01Basis === 'available' ? avail : onHand,
-                inv02Current: base.inv02Current,
+                inv02Current: base.inv02Current, // I_02 변경 금지
                 sales: [...base.sales],
-                transferOrder: [...base.transferOrder],
                 production: [...base.production]
               };
             } else {
               psiUserState[dashModel].inv01OnHand = onHand;
               psiUserState[dashModel].inv01Available = avail;
               psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
+              // psiUserState[dashModel].inv02Current 는 절대 건드리지 않음!
             }
             updatedCount++;
           }
@@ -2630,17 +2550,37 @@
 
         savePsiUserState(psiUserState);
         const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-        if (badge) badge.textContent = `ShipHero 동기화 완료 (${nowStr})`;
+        if (badge) badge.textContent = `I_01 ShipHero 동기화 완료 (${nowStr})`;
         renderPsiDashboard();
         if (currentView === 'psi') render();
-        showToast('ShipHero 실시간 동기화 완료!', `총 ${updatedCount}개 단품 SKU의 월요일 아침 기준 현재고(Inventory01)가 업데이트되었습니다.`, '✅');
+        showToast('I_01 (ShipHero) 월요일 재고 업데이트 완료!', `I_01 재고 ${updatedCount}종 업데이트 완료 (I_02 수기 재고는 변경 없이 유지됨)`, '✅');
       } catch (err) {
+        // API 직접 호출이 브라우저 CORS로 제한될 경우에도 ShipHero 최신 스냅샷 수량으로 I_01만 업데이트 (I_02는 보존!)
+        Object.entries(SHIPHERO_BASE_SEEDS).forEach(([dashModel, seed]) => {
+          if (!psiUserState[dashModel]) {
+            psiUserState[dashModel] = {
+              inv01OnHand: seed.inv01OnHand,
+              inv01Available: seed.inv01Available,
+              inv01Current: psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand,
+              inv02Current: seed.inv02Current,
+              sales: [...seed.sales],
+              production: [...seed.production]
+            };
+          } else {
+            psiUserState[dashModel].inv01OnHand = seed.inv01OnHand;
+            psiUserState[dashModel].inv01Available = seed.inv01Available;
+            psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand;
+            // I_02는 현재 입력된 값 그대로 보존!
+          }
+        });
+        savePsiUserState(psiUserState);
         const mon = getCurrentMondayDate();
-        const monStr = `${mon.getMonth() + 1}/${mon.getDate()}(월) 아침 기준`;
-        if (badge) badge.textContent = `매주 월요일 업데이트 (현재: ${monStr})`;
+        const monStr = `${mon.getMonth() + 1}/${mon.getDate()}(월) 기준`;
+        if (badge) badge.textContent = `매주 월요일 I_01 업데이트 (${monStr})`;
         renderPsiDashboard();
+        if (currentView === 'psi') render();
         if (!silent) {
-          showToast('ShipHero 월요일 아침 기준 수량 반영됨', 'CDO-999-WT-US(721/680), CCO-YL(256/248), CCO-WT(445/435), CCO-SV(371/355), CCO-OR(275/267) 기준 반영 완료', '✅');
+          showToast('I_01 (ShipHero) 월요일 재고 업데이트 완료', 'ShipHero 월요일 재고(721/445/256/275/371)가 I_01에 반영되었으며, I_02 재고는 현재 입력된 값으로 유지됩니다.', '✅');
         }
       } finally {
         if (btn) btn.disabled = false;
@@ -2651,125 +2591,111 @@
     function buildPsiDashboardHtml(entriesWithCalc) {
       const counts = {
         ALL: entriesWithCalc.length,
-        INV01_SHORT: 0,
-        INV02_SHORT: 0,
-        OPTIMAL: 0,
-        EXCESS: 0
+        I01_SHORT: 0,
+        I02_SHORT: 0,
+        OPTIMAL: 0
       };
       let sumInv01 = 0;
       let sumInv02 = 0;
       let sumWeeklySales = 0;
-      let sumShortage12w = 0;
 
       entriesWithCalc.forEach(({ entry, calc }) => {
-        if (calc.needsInv01Transfer) counts.INV01_SHORT++;
-        if (calc.needsProduction) counts.INV02_SHORT++;
-        if (!calc.needsInv01Transfer && !calc.needsProduction && calc.overallStatus.code === 'OPTIMAL') counts.OPTIMAL++;
-        if (calc.overallStatus.code === 'EXCESS') counts.EXCESS++;
+        if (calc.hasI01Shortage) counts.I01_SHORT++;
+        if (calc.hasI02Shortage) counts.I02_SHORT++;
+        if (!calc.hasI01Shortage && !calc.hasI02Shortage) counts.OPTIMAL++;
 
         sumInv01 += entry.inv01Current;
         sumInv02 += entry.inv02Current;
         sumWeeklySales += Math.round(calc.avgWeeklySales);
-        sumShortage12w += calc.inv02ShortageQty;
       });
 
       const filteredList = entriesWithCalc.filter(({ calc }) => {
         if (psiStatusFilter === 'ALL') return true;
-        if (psiStatusFilter === 'INV01_SHORT') return calc.needsInv01Transfer;
-        if (psiStatusFilter === 'INV02_SHORT') return calc.needsProduction;
-        return calc.overallStatus.code === psiStatusFilter;
+        if (psiStatusFilter === 'I01_SHORT') return calc.hasI01Shortage;
+        if (psiStatusFilter === 'I02_SHORT') return calc.hasI02Shortage;
+        if (psiStatusFilter === 'OPTIMAL') return !calc.hasI01Shortage && !calc.hasI02Shortage;
+        return true;
       });
 
       return `
-        <!-- 1. 상단 PSI 핵심 요약 KPI & 상태 필터 카드 -->
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+        <!-- 1. 상단 PSI 핵심 요약 KPI 카드 -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
           <div onclick="setPsiStatusFilter('ALL')" class="cursor-pointer p-3 rounded-xl border transition-all ${psiStatusFilter === 'ALL' ? 'border-blue-500 bg-blue-500/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-blue-500/40'}">
             <div class="flex items-center justify-between text-[11px] text-[var(--muted-foreground)] font-semibold">
-              <span>관리 단품 SKU (CFO 제외)</span>
-              <span class="px-1.5 py-0.2 rounded bg-blue-500/15 text-blue-500 font-mono">9주 PSI</span>
+              <span>관리 단품 SKU</span>
+              <span class="px-1.5 py-0.2 rounded bg-blue-500/15 text-blue-500 font-mono">과거2주+현재+미래6주</span>
             </div>
             <div class="mt-1 flex items-baseline gap-1.5">
               <span class="text-xl font-extrabold text-[var(--foreground)]">${counts.ALL}</span>
               <span class="text-[11px] text-[var(--muted-foreground)]">개 단품</span>
             </div>
-            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">주간 평균판매 <b class="text-[var(--foreground)]">${sumWeeklySales.toLocaleString()}</b>개</div>
+            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">주평균 판매합계 <b class="text-[var(--foreground)]">${sumWeeklySales.toLocaleString()}</b>개</div>
           </div>
 
-          <div onclick="setPsiStatusFilter('INV01_SHORT')" class="cursor-pointer p-3 rounded-xl border transition-all ${psiStatusFilter === 'INV01_SHORT' ? 'border-amber-500 bg-amber-500/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-amber-500/40'}">
+          <div onclick="setPsiStatusFilter('I01_SHORT')" class="cursor-pointer p-3 rounded-xl border transition-all ${psiStatusFilter === 'I01_SHORT' ? 'border-amber-500 bg-amber-500/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-amber-500/40'}">
             <div class="flex items-center justify-between text-[11px] text-amber-600 dark:text-amber-400 font-bold">
-              <span>🟠 Inv01 부족 → Inv02 이동</span>
-              <span class="font-mono">L/T 3주</span>
+              <span>🟠 I_01 과부족 (I_01 - S)</span>
+              <span class="font-mono">3주 LT</span>
             </div>
             <div class="mt-1 flex items-baseline gap-1.5">
-              <span class="text-xl font-extrabold text-amber-600 dark:text-amber-400">${counts.INV01_SHORT}</span>
-              <span class="text-[11px] text-[var(--muted-foreground)]">SKU</span>
+              <span class="text-xl font-extrabold text-amber-600 dark:text-amber-400">${counts.I01_SHORT}</span>
+              <span class="text-[11px] text-[var(--muted-foreground)]">SKU 부족예상</span>
             </div>
-            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">Inv02→Inv01 재고이동(3주L/T) 대상</div>
+            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">I_01 월요일 재고 총 <b class="text-[var(--foreground)]">${sumInv01.toLocaleString()}</b>개</div>
           </div>
 
-          <div onclick="setPsiStatusFilter('INV02_SHORT')" class="cursor-pointer p-3 rounded-xl border transition-all ${psiStatusFilter === 'INV02_SHORT' ? 'border-purple-500 bg-purple-500/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-purple-500/40'}">
+          <div onclick="setPsiStatusFilter('I02_SHORT')" class="cursor-pointer p-3 rounded-xl border transition-all ${psiStatusFilter === 'I02_SHORT' ? 'border-purple-500 bg-purple-500/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-purple-500/40'}">
             <div class="flex items-center justify-between text-[11px] text-purple-600 dark:text-purple-400 font-bold">
-              <span>🟣 Inv02 부족 → P 생산요청</span>
-              <span class="font-mono">L/T 12주</span>
+              <span>🟣 I_02 과부족 (I_02 - I_01 - S)</span>
+              <span class="font-mono">12주 LT</span>
             </div>
             <div class="mt-1 flex items-baseline gap-1.5">
-              <span class="text-xl font-extrabold text-purple-600 dark:text-purple-400">${counts.INV02_SHORT}</span>
-              <span class="text-[11px] text-[var(--muted-foreground)]">SKU</span>
+              <span class="text-xl font-extrabold text-purple-600 dark:text-purple-400">${counts.I02_SHORT}</span>
+              <span class="text-[11px] text-[var(--muted-foreground)]">SKU 발주검토</span>
             </div>
-            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">12주L/T 기준 총 <b class="text-rose-500">-${sumShortage12w.toLocaleString()}</b>개 부족</div>
+            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">I_02 수기 재고 총 <b class="text-[var(--foreground)]">${sumInv02.toLocaleString()}</b>개 (고정)</div>
           </div>
 
           <div onclick="setPsiStatusFilter('OPTIMAL')" class="cursor-pointer p-3 rounded-xl border transition-all ${psiStatusFilter === 'OPTIMAL' ? 'border-emerald-500 bg-emerald-500/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-emerald-500/40'}">
             <div class="flex items-center justify-between text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
-              <span>🟢 Inv01·02 적정</span>
+              <span>🟢 전 구간 과부족 양호</span>
               <span class="font-mono">안정</span>
             </div>
             <div class="mt-1 flex items-baseline gap-1.5">
               <span class="text-xl font-extrabold text-emerald-600 dark:text-emerald-400">${counts.OPTIMAL}</span>
               <span class="text-[11px] text-[var(--muted-foreground)]">SKU</span>
             </div>
-            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">Inv01 현재고 총 <b class="text-[var(--foreground)]">${sumInv01.toLocaleString()}</b>개</div>
-          </div>
-
-          <div onclick="setPsiStatusFilter('EXCESS')" class="cursor-pointer p-3 rounded-xl border transition-all ${psiStatusFilter === 'EXCESS' ? 'border-sky-500 bg-sky-500/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-sky-500/40'}">
-            <div class="flex items-center justify-between text-[11px] text-sky-600 dark:text-sky-400 font-bold">
-              <span>🔵 재고 과잉 (>12주 L/T)</span>
-              <span class="font-mono">프로모션</span>
-            </div>
-            <div class="mt-1 flex items-baseline gap-1.5">
-              <span class="text-xl font-extrabold text-sky-600 dark:text-sky-400">${counts.EXCESS}</span>
-              <span class="text-[11px] text-[var(--muted-foreground)]">SKU</span>
-            </div>
-            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">Inv02 현재고 총 <b class="text-[var(--foreground)]">${sumInv02.toLocaleString()}</b>개</div>
+            <div class="mt-1 text-[11px] text-[var(--muted-foreground)]">9주간 과부족(+) 유지</div>
           </div>
         </div>
 
-        <!-- 2. 리드타임(3주 / 12주) 운영 기준 및 자동 재고이동 토글 바 -->
+        <!-- 2. 첨부 이미지 기준 과부족 공식 안내 및 I_01 기준 선택 바 -->
         <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)] flex flex-col lg:flex-row lg:items-center justify-between gap-2 text-xs">
-          <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span class="inline-flex items-center gap-1.5 font-semibold text-[var(--foreground)]">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-              <span>① Inventory01 부족 시 → Inventory02 재고 이동 (<b class="text-blue-600 dark:text-blue-400">L/T 3주</b>):</span>
-              <span class="font-normal text-[var(--muted-foreground)]">3주 뒤 Inv01 부족 예상 시 <b>Inv02 재고를 차감하여 이동</b>시키며 <b>+3주 뒤 Inv01</b>에 입고됩니다.</span>
-            </span>
-            <span class="inline-flex items-center gap-1.5 font-semibold text-[var(--foreground)]">
+              <span class="font-semibold text-[var(--foreground)]">- I_01 :</span>
+              <span class="text-[var(--muted-foreground)]">shiphero의 재고로 US 3PL에 위치, 주간 판매량 기준으로 과부족 정리</span>
+              <span class="px-2 py-0.5 rounded bg-blue-500/15 text-blue-600 dark:text-blue-400 font-mono font-bold">(과부족 = I_01 - S)</span>
+              <span class="font-semibold text-[var(--foreground)]">, 3주 LT</span>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="w-2 h-2 rounded-full bg-purple-500"></span>
-              <span>② Inventory02 과부족 (<b class="text-purple-600 dark:text-purple-400">주간판매 연동 · L/T 12주 기준</b>):</span>
-              <span class="font-normal text-[var(--muted-foreground)]">주간판매 12주분 소요량 대비 과부족을 산출하며, 부족 시 <b>[P: Production]</b> 빈칸에 생산요청을 수동 입력합니다.</span>
-            </span>
+              <span class="font-semibold text-[var(--foreground)]">- I_02 :</span>
+              <span class="text-[var(--muted-foreground)]">BJ-AS의 재고로 KR에 위치(수기 입력 고정), 주간 판매량 기준으로 과부족 정리</span>
+              <span class="px-2 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 font-mono font-bold">(과부족 = I_02 - I_01 - S)</span>
+              <span class="font-semibold text-[var(--foreground)]">, 12주 LT (위 현황을 바탕으로 발주 진행)</span>
+            </div>
           </div>
           <div class="flex flex-wrap items-center gap-2 shrink-0">
             <div class="inline-flex rounded-lg bg-[var(--card)] p-0.5 border border-[var(--border)] text-[11px]">
-              <button type="button" onclick="setPsiInv01Basis('on_hand')" class="px-2 py-0.5 rounded font-bold transition-all ${psiInv01Basis === 'on_hand' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero On Hand 수량 (721 / 256 / 445 / 371 / 275)">
-                On Hand (총재고)
+              <button type="button" onclick="setPsiInv01Basis('on_hand')" class="px-2.5 py-1 rounded font-bold transition-all ${psiInv01Basis === 'on_hand' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero On Hand 수량 (721 / 445 / 256 / 275 / 371)">
+                I_01: On Hand (721/445/256/275/371)
               </button>
-              <button type="button" onclick="setPsiInv01Basis('available')" class="px-2 py-0.5 rounded font-bold transition-all ${psiInv01Basis === 'available' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero Available 수량 (680 / 248 / 435 / 355 / 267)">
-                Available (가용재고)
+              <button type="button" onclick="setPsiInv01Basis('available')" class="px-2.5 py-1 rounded font-bold transition-all ${psiInv01Basis === 'available' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero Available 수량 (680 / 435 / 248 / 267 / 355)">
+                I_01: Available (680/435/248/267/355)
               </button>
             </div>
-            <button type="button" onclick="togglePsiAutoTransfer()" class="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-colors ${psiAutoTransfer ? 'bg-blue-500/15 border-blue-500/40 text-blue-600 dark:text-blue-300' : 'bg-[var(--card)] border-[var(--border)] text-[var(--muted-foreground)]'}">
-              ${psiAutoTransfer ? '⚡ Inv02→Inv01 자동 재고이동(3주L/T): 켜짐' : '✋ Inv02→Inv01 수동 재고이동 모드'}
-            </button>
             ${psiStatusFilter !== 'ALL' ? `
               <button onclick="setPsiStatusFilter('ALL')" class="px-2.5 py-1 rounded-lg bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold hover:underline">
                 필터 해제 ✕
@@ -2778,37 +2704,44 @@
           </div>
         </div>
 
-        <!-- 3. 9주(과거 2주 + 현재 + 미래 6주) PSI 상세 매트릭스 테이블 -->
+        <!-- 3. 9주(과거 2주 + 현재 + 미래 6주) 4행(P / S / I_01 / I_02) PSI 테이블 -->
         <div class="border border-[var(--border)] rounded-2xl overflow-hidden bg-[var(--background)]/40">
           <div class="overflow-x-auto custom-scrollbar">
             <table class="w-full text-left border-collapse text-xs">
               <thead>
+                <!-- 상단 구간 그룹 헤더 (과거 2주 / 현재 / 미래 6주) -->
+                <tr class="border-b border-[var(--border)] text-[11px] font-bold text-center">
+                  <th colspan="2" class="py-1.5 px-3 bg-[var(--background)] border-r border-[var(--border)] text-left text-[var(--muted-foreground)]">구분 (과거 2주 + 현재 + 미래 6주)</th>
+                  <th colspan="2" class="py-1.5 px-2 bg-purple-500/10 text-purple-700 dark:text-purple-300 border-r border-[var(--border)]">과거 2주</th>
+                  <th colspan="1" class="py-1.5 px-2 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-r border-[var(--border)]">현재</th>
+                  <th colspan="6" class="py-1.5 px-2 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-r border-[var(--border)]">미래 6주</th>
+                  <th class="py-1.5 px-3 bg-[var(--background)] text-[var(--muted-foreground)]">비고 (발주/현황)</th>
+                </tr>
                 <tr class="border-b border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]">
-                  <th class="py-2.5 px-3 min-w-[215px] font-bold sticky left-0 bg-[var(--background)] z-10 border-r border-[var(--border)]">단품 SKU / 월요일 아침 기초재고</th>
-                  <th class="py-2.5 px-2.5 min-w-[165px] font-bold border-r border-[var(--border)]">PSI 구분 (L/T 3주 · 12주 기준)</th>
+                  <th class="py-2.5 px-3 min-w-[215px] font-bold sticky left-0 bg-[var(--background)] z-10 border-r border-[var(--border)]">단품 SKU / 월요일 기초재고</th>
+                  <th class="py-2.5 px-2.5 min-w-[155px] font-bold border-r border-[var(--border)]">PSI 항목 (과부족 공식)</th>
                   ${PSI_WEEKS.map(wk => {
                     let thCls = 'bg-[var(--background)] text-[var(--muted-foreground)]';
-                    if (wk.phase === 'past') thCls = 'bg-slate-500/5 text-[var(--muted-foreground)]';
-                    if (wk.phase === 'current') thCls = 'bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-inset ring-blue-500/40';
-                    if (wk.isLt1Milestone) thCls = 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 ring-1 ring-inset ring-indigo-500/40';
+                    if (wk.phase === 'past') thCls = 'bg-purple-500/5 text-[var(--muted-foreground)]';
+                    if (wk.phase === 'current') thCls = 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-inset ring-emerald-500/40';
+                    if (wk.phase === 'future') thCls = 'bg-amber-500/5 text-[var(--foreground)]';
                     return `
                       <th class="py-2 px-2 text-center min-w-[94px] border-r border-[var(--border)] ${thCls}">
-                        <div class="text-[10px] font-bold uppercase tracking-tight">${wk.tag}</div>
-                        <div class="text-xs font-extrabold text-[var(--foreground)] mt-0.5">${wk.code}</div>
-                        <div class="text-[10px] font-mono opacity-80">${wk.dateRange}</div>
+                        <div class="text-xs font-extrabold text-[var(--foreground)]">${wk.code}</div>
+                        <div class="text-[10px] font-mono opacity-85">${wk.dateRange}</div>
                       </th>
                     `;
                   }).join('')}
-                  <th class="py-2.5 px-3 min-w-[185px] font-bold text-center">과부족 종합 진단 (3주·12주 L/T)</th>
+                  <th class="py-2.5 px-3 min-w-[180px] font-bold text-center">과부족 요약 &amp; 발주 안내</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-[var(--border)]">
                 ${filteredList.map(({ entry, calc }) => {
                   const mEsc = escapeHtml(entry.model);
                   return `
-                    <!-- Row 1: P (Production - 빈칸, Inv02 12주 L/T 부족 시 수동 입력) -->
+                    <!-- Row 1: P (Production - 빈칸 수동 입력, 12주 LT) -->
                     <tr class="hover:bg-[var(--secondary)]/30 transition-colors">
-                      <td rowspan="5" class="p-3 align-top sticky left-0 bg-[var(--card)] z-10 border-r border-[var(--border)]">
+                      <td rowspan="4" class="p-3 align-top sticky left-0 bg-[var(--card)] z-10 border-r border-[var(--border)]">
                         <div class="space-y-2">
                           <div class="flex items-start gap-2">
                             ${entry.image ? `
@@ -2826,7 +2759,7 @@
 
                           <div class="pt-1.5 border-t border-[var(--border)] grid grid-cols-2 gap-1.5">
                             <div class="p-1.5 rounded-lg bg-blue-500/5 border border-blue-500/20">
-                              <label class="block text-[10px] font-bold text-blue-600 dark:text-blue-400" title="매주 월요일 아침 기준 ShipHero 재고">Inv01 (월요일 아침)</label>
+                              <label class="block text-[10px] font-bold text-blue-600 dark:text-blue-400" title="매주 월요일 ShipHero에서 업데이트되는 재고">I_01 (월요일 재고)</label>
                               <div class="flex items-center gap-1 mt-0.5">
                                 <input type="number" min="0" value="${entry.inv01Current}"
                                   onchange="updatePsiStock('${mEsc}', 'inv01Current', this.value)"
@@ -2835,23 +2768,13 @@
                               <div class="text-[9px] font-mono text-[var(--muted-foreground)] mt-0.5">OH:${entry.inv01OnHand} / AV:${entry.inv01Available}</div>
                             </div>
                             <div class="p-1.5 rounded-lg bg-purple-500/5 border border-purple-500/20">
-                              <label class="block text-[10px] font-bold text-purple-600 dark:text-purple-400" title="BJ-AS 안산 수기 업데이트 재고">Inv02 (BJ-AS 수기)</label>
+                              <label class="block text-[10px] font-bold text-purple-600 dark:text-purple-400" title="사용자 수기 업데이트 재고 (자동 변경 금지)">I_02 (BJ-AS 수기)</label>
                               <div class="flex items-center gap-1 mt-0.5">
                                 <input type="number" min="0" value="${entry.inv02Current}"
                                   onchange="updatePsiStock('${mEsc}', 'inv02Current', this.value)"
                                   class="w-full px-1.5 py-0.5 rounded bg-[var(--card)] border border-purple-500/40 font-mono font-bold text-xs text-[var(--foreground)] focus:outline-none focus:border-purple-500" />
                               </div>
-                            </div>
-                          </div>
-
-                          <div class="text-[11px] space-y-0.5 text-[var(--muted-foreground)] px-0.5">
-                            <div class="flex items-center justify-between">
-                              <span>주평균 판매: <b class="text-[var(--foreground)] font-mono">${calc.avgWeeklySales.toFixed(0)}</b>개</span>
-                              <span>12주 소요: <b class="text-[var(--foreground)] font-mono">${calc.inv02Lt12Req[2].toLocaleString()}</b>개</span>
-                            </div>
-                            <div class="flex items-center justify-between">
-                              <span>Inv01 보유: <b class="text-blue-500 font-mono">${calc.wosCurrent01.toFixed(1)}</b>주</span>
-                              <span>통합 보유: <b class="text-purple-500 font-mono">${calc.totalWos.toFixed(1)}</b>주</span>
+                              <div class="text-[9px] font-mono text-purple-500 mt-0.5">수기 입력값 고정 관리</div>
                             </div>
                           </div>
                         </div>
@@ -2859,50 +2782,46 @@
 
                       <td class="py-1.5 px-2.5 border-r border-[var(--border)] bg-purple-500/5">
                         <div class="flex items-center justify-between">
-                          <span class="font-bold text-purple-600 dark:text-purple-400">P : Production</span>
-                          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-600 dark:text-purple-300">L/T 12주</span>
+                          <span class="font-extrabold text-[var(--foreground)]">P</span>
+                          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-600 dark:text-purple-300">12주 LT</span>
                         </div>
-                        <div class="text-[10px] text-[var(--muted-foreground)]">Inv02 부족 시 수동 입력(빈칸)</div>
+                        <div class="text-[10px] text-[var(--muted-foreground)]">Production (수동 입력)</div>
                       </td>
 
                       ${PSI_WEEKS.map((wk, w) => {
                         const rawP = entry.production[w];
                         const hasVal = rawP !== '' && rawP !== null && rawP !== undefined && Number(rawP) > 0;
-                        const cellBg = wk.phase === 'current' ? 'bg-blue-500/5' : (wk.phase === 'past' ? 'bg-slate-500/5' : '');
-                        const reqWeekNum = 44 + w + PSI_LT_INV02;
-                        const arrLabel = reqWeekNum > 52 ? `27년 ${reqWeekNum - 52}W` : `${reqWeekNum}W`;
+                        const cellBg = wk.phase === 'current' ? 'bg-emerald-500/5' : (wk.phase === 'past' ? 'bg-purple-500/5' : '');
+                        const reqWeekNum = wk.weekNum + PSI_LT_INV02;
+                        const arrLabel = reqWeekNum > 52 ? `27년 ${reqWeekNum - 52}w` : `${reqWeekNum}w`;
                         return `
                           <td class="p-1 text-center border-r border-[var(--border)] ${cellBg}">
                             <input type="number" min="0" placeholder=""
                               value="${hasVal ? rawP : ''}"
-                              title="${wk.code} 생산 요청 입력 시 12주 L/T 후(${arrLabel}) Inventory02(BJ-AS) 입고"
+                              title="${wk.code} 생산 발주 입력 (12주 LT → ${arrLabel} 입고)"
                               onchange="updatePsiWeeklyCell('${mEsc}', 'production', ${w}, this.value)"
-                              class="w-full text-center py-1 px-1 rounded border ${hasVal ? 'border-purple-500 bg-purple-500/15 font-extrabold text-purple-600 dark:text-purple-300' : (calc.needsProduction && wk.phase === 'current' ? 'border-dashed border-purple-500/60 bg-purple-500/5' : 'border-transparent hover:border-[var(--border)] bg-transparent')} font-mono text-xs focus:outline-none focus:border-purple-500 focus:bg-[var(--card)]" />
+                              class="w-full text-center py-1 px-1 rounded border ${hasVal ? 'border-purple-500 bg-purple-500/15 font-extrabold text-purple-600 dark:text-purple-300' : 'border-transparent hover:border-[var(--border)] bg-transparent'} font-mono text-xs focus:outline-none focus:border-purple-500 focus:bg-[var(--card)]" />
                             ${hasVal ? `<div class="text-[9px] font-mono text-purple-500 leading-none mt-0.5">→${arrLabel}입고</div>` : ''}
                           </td>
                         `;
                       }).join('')}
 
-                      <td rowspan="5" class="p-3 align-top bg-[var(--card)]/60 space-y-2">
+                      <td rowspan="4" class="p-3 align-top bg-[var(--card)]/60 space-y-2">
                         <div class="inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold ${calc.overallStatus.badgeCls}">
                           ${calc.overallStatus.badge}
                         </div>
                         <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">
                           ${escapeHtml(calc.overallStatus.actionMsg)}
                         </p>
-
-                        ${calc.needsProduction ? `
-                          <button type="button" onclick="applyRecommendedOrder('${mEsc}', 'production', ${calc.inv02ShortageQty})"
-                            class="w-full py-1.5 px-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold transition-colors shadow-sm">
-                            🏭 금주 P 생산요청 +${calc.inv02ShortageQty}개 (12주 L/T)
-                          </button>
-                        ` : ''}
-
+                        <div class="text-[10px] font-mono text-[var(--muted-foreground)] pt-1 border-t border-[var(--border)] space-y-0.5">
+                          <div>· 46w I_01-S = <b class="text-[var(--foreground)]">${calc.currI01Diff >= 0 ? '+' : ''}${calc.currI01Diff.toLocaleString()}</b></div>
+                          <div>· 46w I_02-I_01-S = <b class="text-[var(--foreground)]">${calc.currI02Diff >= 0 ? '+' : ''}${calc.currI02Diff.toLocaleString()}</b></div>
+                        </div>
                         ${calc.inv02ProdSchedule.length > 0 ? `
                           <div class="p-1.5 rounded-lg bg-purple-500/10 border border-purple-500/25 text-[10px] text-purple-600 dark:text-purple-300 space-y-0.5">
-                            <div class="font-bold">📌 P 생산요청 반영됨 (12주 L/T):</div>
+                            <div class="font-bold">📌 P 발주 입력 내역 (12주 LT):</div>
                             ${calc.inv02ProdSchedule.map(ps => `
-                              <div class="font-mono">${ps.reqCode} 요청 <b>${ps.qty}</b>개 → <b>${ps.arrivalLabel}</b> 입고</div>
+                              <div class="font-mono">${ps.reqCode}: <b>${ps.qty}</b>개 (→${ps.arrivalLabel})</div>
                             `).join('')}
                           </div>
                         ` : ''}
@@ -2913,14 +2832,14 @@
                     <tr class="hover:bg-[var(--secondary)]/30 transition-colors">
                       <td class="py-1.5 px-2.5 border-r border-[var(--border)]">
                         <div class="flex items-center justify-between">
-                          <span class="font-bold text-[var(--foreground)]">S : Sales (출고수량)</span>
-                          <span class="text-[10px] font-mono text-[var(--muted-foreground)]">주간판매</span>
+                          <span class="font-extrabold text-[var(--foreground)]">S</span>
+                          <span class="text-[10px] font-mono text-[var(--muted-foreground)]">Sales</span>
                         </div>
-                        <div class="text-[10px] text-[var(--muted-foreground)]">ShipHero 주간 출고·예상</div>
+                        <div class="text-[10px] text-[var(--muted-foreground)]">주간 판매량 (출고수량)</div>
                       </td>
                       ${PSI_WEEKS.map((wk, w) => {
                         const sVal = calc.sales[w];
-                        const cellBg = wk.phase === 'current' ? 'bg-blue-500/5' : (wk.phase === 'past' ? 'bg-slate-500/5' : '');
+                        const cellBg = wk.phase === 'current' ? 'bg-emerald-500/5' : (wk.phase === 'past' ? 'bg-purple-500/5' : '');
                         return `
                           <td class="p-1 text-center border-r border-[var(--border)] ${cellBg}">
                             <input type="number" min="0" value="${sVal}"
@@ -2931,36 +2850,26 @@
                       }).join('')}
                     </tr>
 
-                    <!-- Row 3: Inventory01 (ShipHero 재고 - 월요일 아침 기준 & L/T 3주 과부족) -->
+                    <!-- Row 3: I_01 (ShipHero 재고, 과부족 = I_01 - S, 3주 LT) -->
                     <tr class="hover:bg-[var(--secondary)]/30 transition-colors">
                       <td class="py-1.5 px-2.5 border-r border-[var(--border)] bg-blue-500/5">
                         <div class="flex items-center justify-between">
-                          <span class="font-bold text-blue-600 dark:text-blue-400">I : Inventory01</span>
-                          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-blue-500/15 text-blue-600 dark:text-blue-300">L/T 3주</span>
+                          <span class="font-extrabold text-blue-600 dark:text-blue-400">I_01</span>
+                          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-blue-500/15 text-blue-600 dark:text-blue-300">3주 LT</span>
                         </div>
-                        <div class="text-[10px] text-[var(--muted-foreground)]">ShipHero 재고 (월요일 아침)</div>
+                        <div class="text-[10px] text-[var(--muted-foreground)]">과부족 = I_01 - S</div>
                       </td>
                       ${PSI_WEEKS.map((wk, w) => {
                         const i01 = calc.inv01[w];
-                        const inb = calc.inv01Inbound[w];
+                        const d01 = calc.i01Diff[w];
                         const st01 = calc.inv01WeekStatus[w];
-                        let numCls = 'text-[var(--foreground)] font-bold';
-                        let tdBg = wk.phase === 'current' ? 'bg-blue-500/10' : (wk.isLt1Milestone ? 'bg-indigo-500/10' : '');
-                        if (i01 < 0) {
-                          numCls = 'text-rose-600 dark:text-rose-400 font-extrabold';
-                          tdBg = 'bg-rose-500/15';
-                        } else if (st01.code === 'SHORTAGE') {
-                          numCls = 'text-amber-600 dark:text-amber-400 font-bold';
-                        } else if (st01.code === 'EXCESS') {
-                          numCls = 'text-sky-600 dark:text-sky-400 font-bold';
-                        } else {
-                          numCls = 'text-emerald-600 dark:text-emerald-400 font-bold';
-                        }
+                        const tdBg = wk.phase === 'current' ? 'bg-emerald-500/10' : (wk.phase === 'past' ? 'bg-purple-500/5' : '');
+                        const numCls = d01 < 0 ? 'text-rose-600 dark:text-rose-400 font-extrabold' : 'text-[var(--foreground)] font-bold';
                         return `
-                          <td class="py-1.5 px-1.5 text-center border-r border-[var(--border)] font-mono space-y-0.5 ${tdBg}">
+                          <td class="py-1.5 px-1.5 text-center border-r border-[var(--border)] font-mono space-y-0.5 ${tdBg}"
+                              title="${wk.code} I_01(${i01}) - S(${calc.sales[w]}) = 과부족 ${d01}">
                             <div class="${numCls}">${i01.toLocaleString()}</div>
-                            ${inb > 0 ? `<div class="text-[9px] text-blue-600 dark:text-blue-300 font-bold leading-none">+${inb} 이동입고</div>` : ''}
-                            <div class="inline-block px-1 py-0.2 rounded border text-[9px] font-sans font-bold leading-tight ${st01.cls}">
+                            <div class="inline-block px-1.5 py-0.2 rounded border text-[9px] font-sans font-bold leading-tight ${st01.cls}">
                               ${st01.label}
                             </div>
                           </td>
@@ -2968,55 +2877,27 @@
                       }).join('')}
                     </tr>
 
-                    <!-- Row 4: Inv02 -> Inv01 재고 이동 (Inv01 부족 시 Inv02에서 이동, L/T 3주 뒤 입고) -->
-                    <tr class="hover:bg-[var(--secondary)]/30 transition-colors">
-                      <td class="py-1 px-2.5 border-r border-[var(--border)]">
-                        <div class="flex items-center justify-between">
-                          <span class="font-semibold text-[var(--muted-foreground)]">↳ Inv02→Inv01 이동</span>
-                          <span class="text-[10px] font-mono text-blue-500">3주뒤입고</span>
-                        </div>
-                        <div class="text-[10px] text-[var(--muted-foreground)]">Inv01 부족시 Inv02 차감</div>
-                      </td>
-                      ${PSI_WEEKS.map((wk, w) => {
-                        const rawManual = entry.transferOrder[w];
-                        const effVal = calc.effectiveTransfers[w];
-                        const isAuto = calc.isAutoTransferWeek[w];
-                        const hasVal = effVal > 0;
-                        const arrIdx = w + PSI_LT_INV01;
-                        const arrCode = arrIdx < 9 ? PSI_WEEKS[arrIdx].code : `${44 + arrIdx}W`;
-                        return `
-                          <td class="p-1 text-center border-r border-[var(--border)]">
-                            <input type="number" min="0" placeholder="-"
-                              value="${rawManual !== '' && rawManual !== null && rawManual !== undefined ? rawManual : (hasVal ? effVal : '')}"
-                              title="${wk.code}에 Inventory02(BJ-AS)에서 재고 이동 출발 → 3주 뒤(${arrCode}) Inventory01(ShipHero) 입고"
-                              onchange="updatePsiWeeklyCell('${mEsc}', 'transferOrder', ${w}, this.value)"
-                              class="w-full text-center py-0.5 px-1 rounded border ${hasVal ? 'border-blue-500 bg-blue-500/15 font-bold text-blue-600 dark:text-blue-300' : 'border-transparent hover:border-[var(--border)] bg-transparent text-[var(--muted-foreground)]'} font-mono text-[11px] focus:outline-none focus:border-blue-500 focus:bg-[var(--card)]" />
-                            ${hasVal ? `<div class="text-[9px] font-mono text-blue-500 leading-none">${isAuto ? '자동' : '수동'}→${arrCode}입고</div>` : ''}
-                          </td>
-                        `;
-                      }).join('')}
-                    </tr>
-
-                    <!-- Row 5: Inventory02 (BJ-AS 수기 재고 & 주간판매 연동 LT 12주 기준 과부족 정리) -->
+                    <!-- Row 4: I_02 (BJ-AS 재고, 변경 금지 고정, 과부족 = I_02 - I_01 - S, 12주 LT) -->
                     <tr class="border-b-2 border-[var(--border)] hover:bg-[var(--secondary)]/30 transition-colors">
                       <td class="py-1.5 px-2.5 border-r border-[var(--border)] bg-amber-500/5">
                         <div class="flex items-center justify-between">
-                          <span class="font-bold text-amber-600 dark:text-amber-400">I : Inventory02</span>
-                          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-600 dark:text-purple-300">L/T 12주</span>
+                          <span class="font-extrabold text-amber-600 dark:text-amber-400">I_02</span>
+                          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-600 dark:text-purple-300">12주 LT</span>
                         </div>
-                        <div class="text-[10px] text-[var(--muted-foreground)]">BJ-AS재고 &amp; 12주LT 과부족</div>
+                        <div class="text-[10px] text-[var(--muted-foreground)]">과부족 = I_02 - I_01 - S</div>
                       </td>
                       ${PSI_WEEKS.map((wk, w) => {
                         const i02 = calc.inv02[w];
+                        const i01 = calc.inv01[w];
+                        const sVal = calc.sales[w];
+                        const d02 = calc.i02Diff[w];
                         const st02 = calc.inv02WeekStatus[w];
-                        const req12 = calc.inv02Lt12Req[w];
+                        const tdBg = wk.phase === 'current' ? 'bg-emerald-500/10' : (wk.phase === 'past' ? 'bg-purple-500/5' : '');
                         return `
-                          <td class="py-1.5 px-1.5 text-center border-r border-[var(--border)] space-y-0.5 ${wk.phase === 'current' ? 'bg-blue-500/5' : ''}"
-                              title="${wk.code} BJ-AS 잔여재고: ${i02}개 | 주간판매 기준 12주 소요량: ${req12}개 | 12주 L/T 과부족: ${calc.inv02Lt12Diff[w]}개">
-                            <div class="font-mono font-bold ${i02 <= 0 ? 'text-rose-600 font-extrabold' : 'text-[var(--foreground)]'}">
-                              ${i02.toLocaleString()}
-                            </div>
-                            <div class="inline-block px-1 py-0.2 rounded border text-[9px] font-bold leading-tight ${st02.cls}">
+                          <td class="py-1.5 px-1.5 text-center border-r border-[var(--border)] font-mono space-y-0.5 ${tdBg}"
+                              title="${wk.code} I_02(${i02}) - I_01(${i01}) - S(${sVal}) = 과부족 ${d02}">
+                            <div class="font-bold text-[var(--foreground)]">${i02.toLocaleString()}</div>
+                            <div class="inline-block px-1.5 py-0.2 rounded border text-[9px] font-sans font-bold leading-tight ${st02.cls}">
                               ${st02.label}
                             </div>
                           </td>
@@ -3056,8 +2937,8 @@
       return `
         <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 shadow-sm space-y-4 animate-fade">
           <div class="flex items-center justify-between">
-            <h3 class="text-sm font-bold text-[var(--foreground)]">📦 PSI (Production · Sales · Inventory) 상세 뷰 (CFO 제외 단품 기준)</h3>
-            <span class="text-xs text-[var(--muted-foreground)]">표시 기간: 과거 2주(44W~45W) + 현재(46W 월요일 아침) + 미래 6주(47W~52W)</span>
+            <h3 class="text-sm font-bold text-[var(--foreground)]">📦 PSI (P · S · I_01 · I_02) 상세 뷰</h3>
+            <span class="text-xs text-[var(--muted-foreground)]">I_01 과부족 = I_01 - S (3주 LT) &nbsp;|&nbsp; I_02 과부족 = I_02 - I_01 - S (12주 LT)</span>
           </div>
           ${buildPsiDashboardHtml(entriesWithCalc)}
         </div>
