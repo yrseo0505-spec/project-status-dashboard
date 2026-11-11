@@ -737,14 +737,23 @@
         });
       }
 
+      const normalizeWeekLabel = (val) => {
+        const s = String(val || '').trim();
+        if (!s || s === '주차') return s;
+        const m = s.match(/(\d+)/);
+        return m ? ('W' + m[1]) : s;
+      };
+
       // 주차별 Task 행 파싱 (headerRowIdx + 1 부터 끝까지, 숫자로 된 주차 행만 추출)
       const taskRows = [];
       for (let rIdx = headerRowIdx + 1; rIdx < MP_RAW_ROWS.length; rIdx++) {
         const row = MP_RAW_ROWS[rIdx] || [];
-        const weekSelf = String(row[1] || '').trim();
-        const weekOut = String(row[2] || '').trim();
-        if (!weekSelf && !weekOut) continue;
-        if (weekSelf === '주차' || weekOut === '주차') continue;
+        const rawWeekSelf = String(row[1] || '').trim();
+        const rawWeekOut = String(row[2] || '').trim();
+        if (!rawWeekSelf && !rawWeekOut) continue;
+        if (rawWeekSelf === '주차' || rawWeekOut === '주차') continue;
+        const weekSelf = normalizeWeekLabel(rawWeekSelf);
+        const weekOut = normalizeWeekLabel(rawWeekOut);
 
         const taskMain = String(row[3] || '').trim();
         const task1 = String(row[4] || '').trim();
@@ -1057,7 +1066,7 @@
                 <tr class="transition-colors ${rowBg}">
                   ${spanSelf > 0 ? `
                     <td rowspan="${spanSelf}" class="mp-sticky-left-1 ${rowPy} px-1 text-center font-mono font-extrabold text-sky-700 dark:text-sky-300 border-r border-[var(--border)] align-middle">
-                      ${escapeHtml(tr.weekSelf)}W
+                      ${escapeHtml(tr.weekSelf)}
                     </td>
                   ` : ''}
 
