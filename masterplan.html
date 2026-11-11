@@ -1033,12 +1033,11 @@
                   : 'bg-blue-600/15 text-blue-700 dark:text-blue-300 border-blue-500/30';
                 return `
                   <th colspan="2" class="mp-sticky-top-2 bg-[var(--card)] py-1.5 px-2 border-r border-[var(--border)] min-w-[148px]">
-                    <div class="flex items-center justify-center gap-1 flex-wrap">
+                    <div class="flex items-center justify-center gap-1 whitespace-nowrap">
                       <span class="px-1.5 py-0.1 rounded border text-[9px] font-mono ${buyerCls}">${escapeHtml(p.buyer)}</span>
                       <span class="text-xs font-extrabold text-[var(--foreground)]" title="${escapeHtml(p.fullName)}">${escapeHtml(p.shortTitle)}</span>
                     </div>
-                    <div class="text-[10px] font-mono text-blue-600 dark:text-blue-400 font-bold truncate mt-0.5">${escapeHtml(p.fullName)}</div>
-                    <div class="grid grid-cols-2 text-[9px] font-mono text-[var(--muted-foreground)] mt-0.5 pt-0.5 border-t border-[var(--border)]/60">
+                    <div class="grid grid-cols-2 text-[9px] font-mono text-[var(--muted-foreground)] mt-1 pt-0.5 border-t border-[var(--border)]/60">
                       <span>일정(Date)</span>
                       <span>진행/체크</span>
                     </div>
