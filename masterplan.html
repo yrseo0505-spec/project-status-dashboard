@@ -125,6 +125,12 @@
       background-color: var(--card);
       box-shadow: 2px 2px 0 0 #2563eb;
     }
+    .mp-thick-border-bottom {
+      border-bottom: 2.5px solid #0f172a !important;
+    }
+    .dark .mp-thick-border-bottom {
+      border-bottom: 2.5px solid #38bdf8 !important;
+    }
     .font-mono {
       font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
     }
@@ -993,20 +999,20 @@
       };
 
       const tableHtml = `
-        <table class="w-full text-left border-collapse ${textSz}">
+        <table class="w-full text-left border-separate border-spacing-0 ${textSz}">
           <thead>
             <!-- Row 1: 구글 시트 2행 (자체 / 외주 구분 헤더 - 상단 틀 고정 1행) -->
-            <tr class="border-b border-[var(--border)] bg-[var(--secondary)] text-[10px] font-extrabold text-center">
-              <th class="mp-sticky-top-1 mp-sticky-left-1 mp-sticky-corner py-1 px-1 border-r border-[var(--border)] text-sky-800 dark:text-sky-200">자체</th>
-              <th class="mp-sticky-top-1 mp-sticky-left-2 mp-sticky-corner py-1 px-1 border-r border-[var(--border)] text-blue-800 dark:text-blue-200">외주</th>
-              <th class="mp-sticky-top-1 mp-sticky-left-3 mp-sticky-corner py-1 px-2.5 border-r border-[var(--border)] text-left text-[var(--muted-foreground)]">
+            <tr class="bg-[var(--secondary)] text-[10px] font-extrabold text-center">
+              <th class="mp-sticky-top-1 mp-sticky-left-1 mp-sticky-corner py-1 px-1 border-b border-r border-[var(--border)] text-sky-800 dark:text-sky-200">자체</th>
+              <th class="mp-sticky-top-1 mp-sticky-left-2 mp-sticky-corner py-1 px-1 border-b border-r border-[var(--border)] text-blue-800 dark:text-blue-200">외주</th>
+              <th class="mp-sticky-top-1 mp-sticky-left-3 mp-sticky-corner py-1 px-2.5 border-b border-r border-[var(--border)] text-left text-[var(--muted-foreground)]">
                 표준 개발 공정 (Task 1~4 통합)
               </th>
               ${mpShowSubtasks ? `
-                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-r border-[var(--border)] text-blue-700 dark:text-blue-300 min-w-[125px]">기획/사업/SAP</th>
-                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-r border-[var(--border)] text-sky-700 dark:text-sky-300 min-w-[125px]">디자인/기구/DFM</th>
-                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-r border-[var(--border)] text-cyan-700 dark:text-cyan-300 min-w-[125px]">패키지/상세페이지</th>
-                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-r border-[var(--border)] text-indigo-700 dark:text-indigo-300 min-w-[125px]">금형/신뢰성/양산</th>
+                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-b border-r border-[var(--border)] text-blue-700 dark:text-blue-300 min-w-[125px]">기획/사업/SAP</th>
+                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-b border-r border-[var(--border)] text-sky-700 dark:text-sky-300 min-w-[125px]">디자인/기구/DFM</th>
+                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-b border-r border-[var(--border)] text-cyan-700 dark:text-cyan-300 min-w-[125px]">패키지/상세페이지</th>
+                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-b border-r border-[var(--border)] text-indigo-700 dark:text-indigo-300 min-w-[125px]">금형/신뢰성/양산</th>
               ` : ''}
               ${filteredProjects.map(p => {
                 const isSelf = p.devType === '자체';
@@ -1014,7 +1020,7 @@
                   ? 'bg-sky-500/20 text-sky-800 dark:text-sky-200 border-sky-500/40'
                   : 'bg-blue-600/20 text-blue-800 dark:text-blue-200 border-blue-500/40';
                 return `
-                  <th colspan="2" class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-1.5 border-r border-[var(--border)] text-center">
+                  <th colspan="2" class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-1.5 border-b border-r border-[var(--border)] text-center">
                     <span class="inline-flex items-center px-2 py-0.2 rounded-full border text-[10px] font-extrabold ${badgeCls}">
                       ${escapeHtml(p.devType)} (${isSelf ? '12주' : '29주'})
                     </span>
@@ -1056,33 +1062,33 @@
             </tr>
           </thead>
 
-          <tbody class="divide-y divide-[var(--border)]">
+          <tbody>
             ${filteredTaskRows.map((tr, rIdx) => {
-              const spanSelf = selfWeekSpans[rIdx];
               const isMilestoneRow = tr.taskMain.includes('Start') || tr.taskMain.includes('End') || tr.taskMain.includes('판매') || tr.taskMain.includes('선적');
               const rowBg = isMilestoneRow ? 'bg-blue-500/[0.04] hover:bg-blue-500/10' : 'hover:bg-[var(--secondary)]/60';
+              // 구글 시트 굵은선(SOLID_THICK) 구간: W10 하단(W11 상단) 및 W12 하단(W13 상단)
+              const isThickBottomRow = tr.weekOut === 'W10' || tr.weekOut === 'W12';
+              const rowBottomBorderCls = isThickBottomRow ? 'mp-thick-border-bottom' : 'border-b border-[var(--border)]';
 
               return `
                 <tr class="transition-colors ${rowBg}">
-                  ${spanSelf > 0 ? `
-                    <td rowspan="${spanSelf}" class="mp-sticky-left-1 ${rowPy} px-1 text-center font-mono font-extrabold text-sky-700 dark:text-sky-300 border-r border-[var(--border)] align-middle">
-                      ${escapeHtml(tr.weekSelf)}
-                    </td>
-                  ` : ''}
+                  <td class="mp-sticky-left-1 ${rowPy} px-1 text-center font-mono font-extrabold text-sky-700 dark:text-sky-300 border-r border-[var(--border)] ${rowBottomBorderCls} align-middle">
+                    ${escapeHtml(tr.weekSelf)}
+                  </td>
 
-                  <td class="mp-sticky-left-2 ${rowPy} px-1 text-center font-mono font-bold text-blue-600 dark:text-blue-400 border-r border-[var(--border)]">
+                  <td class="mp-sticky-left-2 ${rowPy} px-1 text-center font-mono font-bold text-blue-600 dark:text-blue-400 border-r border-[var(--border)] ${rowBottomBorderCls}">
                     ${escapeHtml(tr.weekOut)}
                   </td>
 
-                  <td class="mp-sticky-left-3 ${rowPy} ${cellPx} border-r border-[var(--border)]">
+                  <td class="mp-sticky-left-3 ${rowPy} ${cellPx} border-r border-[var(--border)] ${rowBottomBorderCls}">
                     ${renderTaskLinesWithBadges(tr)}
                   </td>
 
                   ${mpShowSubtasks ? `
-                    <td class="${rowPy} ${cellPx} border-r border-[var(--border)] text-[10px] leading-tight">${formatLines(tr.task1)}</td>
-                    <td class="${rowPy} ${cellPx} border-r border-[var(--border)] text-[10px] leading-tight">${formatLines(tr.task2)}</td>
-                    <td class="${rowPy} ${cellPx} border-r border-[var(--border)] text-[10px] leading-tight">${formatLines(tr.task3)}</td>
-                    <td class="${rowPy} ${cellPx} border-r border-[var(--border)] text-[10px] leading-tight">${formatLines(tr.task4)}</td>
+                    <td class="${rowPy} ${cellPx} border-r border-[var(--border)] ${rowBottomBorderCls} text-[10px] leading-tight">${formatLines(tr.task1)}</td>
+                    <td class="${rowPy} ${cellPx} border-r border-[var(--border)] ${rowBottomBorderCls} text-[10px] leading-tight">${formatLines(tr.task2)}</td>
+                    <td class="${rowPy} ${cellPx} border-r border-[var(--border)] ${rowBottomBorderCls} text-[10px] leading-tight">${formatLines(tr.task3)}</td>
+                    <td class="${rowPy} ${cellPx} border-r border-[var(--border)] ${rowBottomBorderCls} text-[10px] leading-tight">${formatLines(tr.task4)}</td>
                   ` : ''}
 
                   ${filteredProjects.map(p => {
@@ -1104,10 +1110,10 @@
                       : (isCurrentWeek ? 'bg-blue-600/10 ring-1 ring-inset ring-blue-500/50' : '');
 
                     return `
-                      <td class="${rowPy} px-1 text-center font-mono text-[10px] border-r border-[var(--border)]/50 whitespace-nowrap ${tdBg}" title="${escapeHtml(p.fullName)} · ${escapeHtml(tr.weekOut)}주차 일정: ${escapeHtml(cell.dateStr)}">
+                      <td class="${rowPy} px-1 text-center font-mono text-[10px] border-r border-[var(--border)]/50 ${rowBottomBorderCls} whitespace-nowrap ${tdBg}" title="${escapeHtml(p.fullName)} · ${escapeHtml(tr.weekOut)}주차 일정: ${escapeHtml(cell.dateStr)}">
                         <span class="${dateCellCls}">${formatShortDate(cell.dateStr)}</span>
                       </td>
-                      <td class="${rowPy} px-1 text-center text-[10px] border-r border-[var(--border)] ${tdBg} min-w-[68px]" title="${escapeHtml(cell.statusStr || '구글 시트에서 입력 시 자동 표시됩니다')}">
+                      <td class="${rowPy} px-1 text-center text-[10px] border-r border-[var(--border)] ${rowBottomBorderCls} ${tdBg} min-w-[68px]" title="${escapeHtml(cell.statusStr || '구글 시트에서 입력 시 자동 표시됩니다')}">
                         ${hasStatus ? `
                           <div class="inline-flex flex-col items-center justify-center px-1.5 py-0.2 rounded bg-blue-600/15 border border-blue-500/40 text-blue-800 dark:text-blue-200 font-bold leading-tight text-[9px]">
                             ${cell.statusStr.split(/\r?\n/).map(s => `<span>${escapeHtml(s.trim())}</span>`).join('')}
