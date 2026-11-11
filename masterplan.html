@@ -70,6 +70,61 @@
       border-top: 3px solid #2563eb !important;
       background: linear-gradient(135deg, var(--card) 0%, var(--secondary) 100%);
     }
+    /* 구글 시트 스타일 틀 고정 (상단 타이틀 행 + 좌측 Task 열 고정) */
+    .mp-freeze-viewport {
+      max-height: calc(100vh - 165px);
+      overflow: auto;
+      position: relative;
+    }
+    .mp-sticky-top-1 {
+      position: sticky;
+      top: 0;
+      height: 28px;
+      z-index: 30;
+    }
+    .mp-sticky-top-2 {
+      position: sticky;
+      top: 28px;
+      z-index: 30;
+      box-shadow: 0 2px 0 0 #2563eb;
+    }
+    .mp-sticky-left-1 {
+      position: sticky;
+      left: 0;
+      width: 44px;
+      min-width: 44px;
+      max-width: 44px;
+      z-index: 20;
+      background-color: var(--card);
+    }
+    .mp-sticky-left-2 {
+      position: sticky;
+      left: 44px;
+      width: 44px;
+      min-width: 44px;
+      max-width: 44px;
+      z-index: 20;
+      background-color: var(--card);
+    }
+    .mp-sticky-left-3 {
+      position: sticky;
+      left: 88px;
+      width: 245px;
+      min-width: 245px;
+      max-width: 245px;
+      z-index: 20;
+      background-color: var(--card);
+      box-shadow: 2px 0 0 0 #2563eb;
+    }
+    .mp-sticky-corner {
+      z-index: 45 !important;
+      background-color: var(--secondary);
+    }
+    .mp-sticky-corner-2 {
+      z-index: 45 !important;
+      background-color: var(--card);
+      box-shadow: 2px 2px 0 0 #2563eb;
+    }
     .font-mono {
       font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
     }
@@ -269,7 +324,7 @@
 
     <!-- Main 1-Page Master Plan Sheet Matrix -->
     <section class="bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-sm overflow-hidden animate-fade">
-      <div id="mp-table-container" class="overflow-x-auto custom-scrollbar"></div>
+      <div id="mp-table-container" class="mp-freeze-viewport custom-scrollbar"></div>
     </section>
 
   </div>
@@ -646,15 +701,19 @@
 
     // 시트 행 데이터(MP_RAW_ROWS)에서 프로젝트 컬럼 메타 및 주차별 행 구조 파싱
     function parseMasterPlanMatrix() {
-      // 헤더 행 탐색: "주차" 또는 "Task"가 들어있는 행 찾기
-      let headerRowIdx = 2;
-      for (let i = 0; i < Math.min(10, MP_RAW_ROWS.length); i++) {
-        const r = MP_RAW_ROWS[i] || [];
-        if (r[1] === '주차' || r[3] === 'Task') {
+      // 헤더 행 탐색: 공백 제거 후 '주차' 또는 'Task' 또는 프로젝트명('diofit_', 'orna_')이 포함된 행을 정확히 탐색
+      let headerRowIdx = -1;
+      for (let i = 0; i < Math.min(12, MP_RAW_ROWS.length); i++) {
+        const r = (MP_RAW_ROWS[i] || []).map(x => String(x || '').trim());
+        const hasWeekAndTask = (r[1] === '주차' || r[2] === '주차') && r[3].toLowerCase() === 'task';
+        const hasProjNames = r.slice(8).some(cell => cell.includes('_') || cell.toLowerCase().includes('diofit') || cell.toLowerCase().includes('orna'));
+        if (hasWeekAndTask || hasProjNames) {
           headerRowIdx = i;
           break;
         }
       }
+      if (headerRowIdx === -1) headerRowIdx = 2;
+
       const typeRow = MP_RAW_ROWS[headerRowIdx - 1] || [];
       const headerRow = MP_RAW_ROWS[headerRowIdx] || [];
 
@@ -662,12 +721,13 @@
       const projects = [];
       for (let c = 8; c < headerRow.length; c += 2) {
         const rawName = String(headerRow[c] || '').trim();
-        if (!rawName) continue;
+        if (!rawName || rawName === '자체' || rawName === '외주') continue;
         const devType = String(typeRow[c] || '').trim() || '외주';
         const parts = rawName.split('_');
-        const buyer = parts.length > 1 ? parts[0] : '기타';
+        const buyer = parts.length > 1 ? parts[0] : '프로젝트';
         const shortTitle = parts.length > 1 ? parts.slice(1).join('_') : rawName;
         projects.push({
+          id: 'proj_col_' + c,
           colDate: c,
           colStatus: c + 1,
           fullName: rawName,
@@ -677,13 +737,14 @@
         });
       }
 
-      // 주차별 Task 행 파싱 (headerRowIdx + 1 부터 끝까지)
+      // 주차별 Task 행 파싱 (headerRowIdx + 1 부터 끝까지, 숫자로 된 주차 행만 추출)
       const taskRows = [];
       for (let rIdx = headerRowIdx + 1; rIdx < MP_RAW_ROWS.length; rIdx++) {
         const row = MP_RAW_ROWS[rIdx] || [];
         const weekSelf = String(row[1] || '').trim();
         const weekOut = String(row[2] || '').trim();
         if (!weekSelf && !weekOut) continue;
+        if (weekSelf === '주차' || weekOut === '주차') continue;
 
         const taskMain = String(row[3] || '').trim();
         const task1 = String(row[4] || '').trim();
@@ -695,7 +756,7 @@
         projects.forEach(p => {
           const dStr = String(row[p.colDate] || '').trim();
           const sStr = String(row[p.colStatus] || '').trim();
-          cells[p.fullName] = {
+          cells[p.id] = {
             dateStr: dStr,
             statusStr: sStr,
             parsedDate: parseKoreanSheetDate(dStr)
@@ -805,7 +866,7 @@
       let totalCheckedCells = 0;
       projects.forEach(p => {
         taskRows.forEach(tr => {
-          const c = tr.cells[p.fullName];
+          const c = tr.cells[p.id];
           if (c && c.statusStr) totalCheckedCells++;
         });
       });
@@ -859,14 +920,14 @@
       const filteredTaskRows = taskRows.filter(tr => {
         if (!mpSearchQuery) return true;
         const hay = [tr.weekSelf, tr.weekOut, tr.taskMain, tr.task1, tr.task2, tr.task3, tr.task4,
-          ...filteredProjects.map(p => (tr.cells[p.fullName]?.dateStr || '') + ' ' + (tr.cells[p.fullName]?.statusStr || ''))
+          ...filteredProjects.map(p => (tr.cells[p.id]?.dateStr || '') + ' ' + (tr.cells[p.id]?.statusStr || ''))
         ].join(' ').toLowerCase();
         return hay.includes(mpSearchQuery);
       });
 
-      // 셀 패딩/폰트 크기 (1페이지 한눈에 보기 모드 시 초고밀도 레이아웃 적용)
+      // 셀 패딩/폰트 크기
       const rowPy = mpCompactOnePage ? 'py-1' : 'py-2';
-      const cellPx = mpCompactOnePage ? 'px-1.5' : 'px-2.5';
+      const cellPx = mpCompactOnePage ? 'px-2' : 'px-2.5';
       const textSz = mpCompactOnePage ? 'text-[11px]' : 'text-xs';
 
       // 자체 주차(Col B) 병합(rowspan) 계산
@@ -925,26 +986,26 @@
       const tableHtml = `
         <table class="w-full text-left border-collapse ${textSz}">
           <thead>
-            <!-- Row 1: 구글 시트 2행 (자체 / 외주 구분 헤더) -->
+            <!-- Row 1: 구글 시트 2행 (자체 / 외주 구분 헤더 - 상단 틀 고정 1행) -->
             <tr class="border-b border-[var(--border)] bg-[var(--secondary)] text-[10px] font-extrabold text-center">
-              <th class="py-1 px-1.5 border-r border-[var(--border)] bg-sky-500/15 text-sky-800 dark:text-sky-200 sticky left-0 z-20 w-[42px]">자체</th>
-              <th class="py-1 px-1.5 border-r border-[var(--border)] bg-blue-600/15 text-blue-800 dark:text-blue-200 sticky left-[42px] z-20 w-[42px]">외주</th>
-              <th class="py-1 px-2 border-r border-[var(--border)] bg-[var(--secondary)] text-left text-[var(--muted-foreground)] sticky left-[84px] z-20 min-w-[210px]">
+              <th class="mp-sticky-top-1 mp-sticky-left-1 mp-sticky-corner py-1 px-1 border-r border-[var(--border)] text-sky-800 dark:text-sky-200">자체</th>
+              <th class="mp-sticky-top-1 mp-sticky-left-2 mp-sticky-corner py-1 px-1 border-r border-[var(--border)] text-blue-800 dark:text-blue-200">외주</th>
+              <th class="mp-sticky-top-1 mp-sticky-left-3 mp-sticky-corner py-1 px-2.5 border-r border-[var(--border)] text-left text-[var(--muted-foreground)]">
                 표준 개발 공정 (Task 1~4 통합)
               </th>
               ${mpShowSubtasks ? `
-                <th class="py-1 px-2 border-r border-[var(--border)] bg-blue-700/10 text-blue-700 dark:text-blue-300 min-w-[125px]">기획/사업/SAP</th>
-                <th class="py-1 px-2 border-r border-[var(--border)] bg-sky-600/10 text-sky-700 dark:text-sky-300 min-w-[125px]">디자인/기구/DFM</th>
-                <th class="py-1 px-2 border-r border-[var(--border)] bg-cyan-600/10 text-cyan-700 dark:text-cyan-300 min-w-[125px]">패키지/상세페이지</th>
-                <th class="py-1 px-2 border-r border-[var(--border)] bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 min-w-[125px]">금형/신뢰성/양산</th>
+                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-r border-[var(--border)] text-blue-700 dark:text-blue-300 min-w-[125px]">기획/사업/SAP</th>
+                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-r border-[var(--border)] text-sky-700 dark:text-sky-300 min-w-[125px]">디자인/기구/DFM</th>
+                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-r border-[var(--border)] text-cyan-700 dark:text-cyan-300 min-w-[125px]">패키지/상세페이지</th>
+                <th class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-2 border-r border-[var(--border)] text-indigo-700 dark:text-indigo-300 min-w-[125px]">금형/신뢰성/양산</th>
               ` : ''}
               ${filteredProjects.map(p => {
                 const isSelf = p.devType === '자체';
                 const badgeCls = isSelf
-                  ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30'
-                  : 'bg-blue-600/15 text-blue-700 dark:text-blue-300 border-blue-500/30';
+                  ? 'bg-sky-500/20 text-sky-800 dark:text-sky-200 border-sky-500/40'
+                  : 'bg-blue-600/20 text-blue-800 dark:text-blue-200 border-blue-500/40';
                 return `
-                  <th colspan="2" class="py-1 px-1.5 border-r border-[var(--border)] text-center ${isSelf ? 'bg-sky-500/10' : 'bg-blue-600/10'}">
+                  <th colspan="2" class="mp-sticky-top-1 bg-[var(--secondary)] py-1 px-1.5 border-r border-[var(--border)] text-center">
                     <span class="inline-flex items-center px-2 py-0.2 rounded-full border text-[10px] font-extrabold ${badgeCls}">
                       ${escapeHtml(p.devType)} (${isSelf ? '12주' : '29주'})
                     </span>
@@ -953,29 +1014,30 @@
               }).join('')}
             </tr>
 
-            <!-- Row 2: 구글 시트 3행 (주차 / 주차 / Task / 프로젝트명) -->
-            <tr class="border-b-2 border-blue-500/40 bg-[var(--card)] text-[11px] font-extrabold text-center">
-              <th class="py-1.5 px-1 border-r border-[var(--border)] bg-[var(--card)] text-sky-700 dark:text-sky-300 sticky left-0 z-20">주차</th>
-              <th class="py-1.5 px-1 border-r border-[var(--border)] bg-[var(--card)] text-blue-700 dark:text-blue-300 sticky left-[42px] z-20">주차</th>
-              <th class="py-1.5 px-2.5 border-r border-[var(--border)] bg-[var(--card)] text-left text-[var(--foreground)] sticky left-[84px] z-20">
+            <!-- Row 2: 구글 시트 3행 (주차 / 주차 / Task / 프로젝트 타이틀 - 상단 틀 고정 2행) -->
+            <tr class="bg-[var(--card)] text-[11px] font-extrabold text-center">
+              <th class="mp-sticky-top-2 mp-sticky-left-1 mp-sticky-corner-2 py-2 px-1 border-r border-[var(--border)] text-sky-700 dark:text-sky-300">주차</th>
+              <th class="mp-sticky-top-2 mp-sticky-left-2 mp-sticky-corner-2 py-2 px-1 border-r border-[var(--border)] text-blue-700 dark:text-blue-300">주차</th>
+              <th class="mp-sticky-top-2 mp-sticky-left-3 mp-sticky-corner-2 py-2 px-2.5 border-r border-[var(--border)] text-left text-[var(--foreground)]">
                 Task (구글 시트 D~H열)
               </th>
               ${mpShowSubtasks ? `
-                <th class="py-1.5 px-2 border-r border-[var(--border)] text-blue-700 dark:text-blue-300">Task 1</th>
-                <th class="py-1.5 px-2 border-r border-[var(--border)] text-sky-700 dark:text-sky-300">Task 2</th>
-                <th class="py-1.5 px-2 border-r border-[var(--border)] text-cyan-700 dark:text-cyan-300">Task 3</th>
-                <th class="py-1.5 px-2 border-r border-[var(--border)] text-indigo-700 dark:text-indigo-300">Task 4</th>
+                <th class="mp-sticky-top-2 bg-[var(--card)] py-2 px-2 border-r border-[var(--border)] text-blue-700 dark:text-blue-300">Task 1</th>
+                <th class="mp-sticky-top-2 bg-[var(--card)] py-2 px-2 border-r border-[var(--border)] text-sky-700 dark:text-sky-300">Task 2</th>
+                <th class="mp-sticky-top-2 bg-[var(--card)] py-2 px-2 border-r border-[var(--border)] text-cyan-700 dark:text-cyan-300">Task 3</th>
+                <th class="mp-sticky-top-2 bg-[var(--card)] py-2 px-2 border-r border-[var(--border)] text-indigo-700 dark:text-indigo-300">Task 4</th>
               ` : ''}
               ${filteredProjects.map(p => {
                 const buyerCls = p.buyer.toLowerCase() === 'diofit'
                   ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30'
                   : 'bg-blue-600/15 text-blue-700 dark:text-blue-300 border-blue-500/30';
                 return `
-                  <th colspan="2" class="py-1.5 px-2 border-r border-[var(--border)] bg-[var(--card)] min-w-[132px]">
+                  <th colspan="2" class="mp-sticky-top-2 bg-[var(--card)] py-1.5 px-2 border-r border-[var(--border)] min-w-[148px]">
                     <div class="flex items-center justify-center gap-1 flex-wrap">
                       <span class="px-1.5 py-0.1 rounded border text-[9px] font-mono ${buyerCls}">${escapeHtml(p.buyer)}</span>
-                      <span class="text-[11px] font-extrabold text-[var(--foreground)] truncate" title="${escapeHtml(p.fullName)}">${escapeHtml(p.shortTitle)}</span>
+                      <span class="text-xs font-extrabold text-[var(--foreground)]" title="${escapeHtml(p.fullName)}">${escapeHtml(p.shortTitle)}</span>
                     </div>
+                    <div class="text-[10px] font-mono text-blue-600 dark:text-blue-400 font-bold truncate mt-0.5">${escapeHtml(p.fullName)}</div>
                     <div class="grid grid-cols-2 text-[9px] font-mono text-[var(--muted-foreground)] mt-0.5 pt-0.5 border-t border-[var(--border)]/60">
                       <span>일정(Date)</span>
                       <span>진행/체크</span>
@@ -995,16 +1057,16 @@
               return `
                 <tr class="transition-colors ${rowBg}">
                   ${spanSelf > 0 ? `
-                    <td rowspan="${spanSelf}" class="${rowPy} px-1 text-center font-mono font-extrabold text-sky-700 dark:text-sky-300 border-r border-[var(--border)] bg-[var(--card)] sticky left-0 z-10 align-middle">
+                    <td rowspan="${spanSelf}" class="mp-sticky-left-1 ${rowPy} px-1 text-center font-mono font-extrabold text-sky-700 dark:text-sky-300 border-r border-[var(--border)] align-middle">
                       ${escapeHtml(tr.weekSelf)}W
                     </td>
                   ` : ''}
 
-                  <td class="${rowPy} px-1 text-center font-mono font-bold text-blue-600 dark:text-blue-400 border-r border-[var(--border)] bg-[var(--card)] sticky left-[42px] z-10">
+                  <td class="mp-sticky-left-2 ${rowPy} px-1 text-center font-mono font-bold text-blue-600 dark:text-blue-400 border-r border-[var(--border)]">
                     ${escapeHtml(tr.weekOut)}
                   </td>
 
-                  <td class="${rowPy} ${cellPx} border-r border-[var(--border)] bg-[var(--card)] sticky left-[84px] z-10">
+                  <td class="mp-sticky-left-3 ${rowPy} ${cellPx} border-r border-[var(--border)]">
                     ${renderTaskLinesWithBadges(tr)}
                   </td>
 
@@ -1016,7 +1078,7 @@
                   ` : ''}
 
                   ${filteredProjects.map(p => {
-                    const cell = tr.cells[p.fullName] || { dateStr: '', statusStr: '', parsedDate: null };
+                    const cell = tr.cells[p.id] || { dateStr: '', statusStr: '', parsedDate: null };
                     const hasStatus = Boolean(cell.statusStr);
                     const dObj = cell.parsedDate;
                     const isCurrentWeek = dObj && dObj >= todayMon && dObj < nextMon;
@@ -1037,7 +1099,7 @@
                       <td class="${rowPy} px-1 text-center font-mono text-[10px] border-r border-[var(--border)]/50 whitespace-nowrap ${tdBg}" title="${escapeHtml(p.fullName)} · ${escapeHtml(tr.weekOut)}주차 일정: ${escapeHtml(cell.dateStr)}">
                         <span class="${dateCellCls}">${formatShortDate(cell.dateStr)}</span>
                       </td>
-                      <td class="${rowPy} px-1 text-center text-[10px] border-r border-[var(--border)] ${tdBg} min-w-[64px]" title="${escapeHtml(cell.statusStr || '구글 시트에서 입력 시 자동 표시됩니다')}">
+                      <td class="${rowPy} px-1 text-center text-[10px] border-r border-[var(--border)] ${tdBg} min-w-[68px]" title="${escapeHtml(cell.statusStr || '구글 시트에서 입력 시 자동 표시됩니다')}">
                         ${hasStatus ? `
                           <div class="inline-flex flex-col items-center justify-center px-1.5 py-0.2 rounded bg-blue-600/15 border border-blue-500/40 text-blue-800 dark:text-blue-200 font-bold leading-tight text-[9px]">
                             ${cell.statusStr.split(/\r?\n/).map(s => `<span>${escapeHtml(s.trim())}</span>`).join('')}
@@ -1086,7 +1148,7 @@
         let elapsedSteps = 0;
         let checkedSteps = 0;
         taskRows.forEach(tr => {
-          const c = tr.cells[p.fullName];
+          const c = tr.cells[p.id];
           if (c && c.parsedDate && c.parsedDate <= now) elapsedSteps++;
           if (c && c.statusStr) checkedSteps++;
         });
