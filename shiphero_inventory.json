@@ -1,0 +1,49 @@
+{
+  "mondayDate": "2026-11-23",
+  "isoYear": 2026,
+  "weekNum": 48,
+  "weekCode": "48W",
+  "syncedAt": "2026-11-24T14:59:11+09:00",
+  "items": {
+    "CDO-999-WT01-US": {
+      "model": "CDO-999-WT01-US",
+      "shipheroSku": "CDO-999-WT-US",
+      "name": "Objet Charger (US/Canada)",
+      "inv01OnHand": 499,
+      "inv01Available": 328,
+      "allocated": 171
+    },
+    "CCO-999-WT01-WW": {
+      "model": "CCO-999-WT01-WW",
+      "shipheroSku": "CCO-999-WT-WW",
+      "name": "Flower Objet (Daisy White)",
+      "inv01OnHand": 379,
+      "inv01Available": 332,
+      "allocated": 47
+    },
+    "CCO-999-YL01-WW": {
+      "model": "CCO-999-YL01-WW",
+      "shipheroSku": "CCO-999-YL-WW",
+      "name": "Flower Objet (Sunflower Yellow)",
+      "inv01OnHand": 210,
+      "inv01Available": 185,
+      "allocated": 25
+    },
+    "CCO-999-OR01-WW": {
+      "model": "CCO-999-OR01-WW",
+      "shipheroSku": "CCO-999-OR-WW",
+      "name": "Flower Objet (Marigold Orange)",
+      "inv01OnHand": 223,
+      "inv01Available": 192,
+      "allocated": 31
+    },
+    "CCO-999-SV01-WW": {
+      "model": "CCO-999-SV01-WW",
+      "shipheroSku": "CCO-999-SV-WW",
+      "name": "Flower Objet (Chrome Silver)",
+      "inv01OnHand": 293,
+      "inv01Available": 207,
+      "allocated": 86
+    }
+  }
+}

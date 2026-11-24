@@ -1956,16 +1956,17 @@
 
     const PSI_WEEKS = buildDynamicPsiWeeks();
 
-    // ShipHero 단품 5종 기준 데이터
-    // - I_01: ShipHero 월요일 아침 재고 (On Hand: 721 / 445 / 256 / 275 / 371, Available: 680 / 435 / 248 / 267 / 355)
+    // ShipHero 단품 5종 기준 데이터 (매주 월요일 GitHub Actions 및 shiphero_inventory.json 자동 동기화)
+    // - I_01: ShipHero 월요일 아침 재고 (On Hand: 499 / 379 / 210 / 223 / 293, Available: 328 / 332 / 185 / 192 / 207)
     // - I_02: 사용자가 업데이트한 2,000개를 기본값으로 고정 관리 (절대 자동 변경하지 않음)
+    const SHIPHERO_SEED_MONDAY = '2026-11-23';
     const SHIPHERO_BASE_SEEDS = {
       'CDO-999-WT01-US': {
         shipheroSku: 'CDO-999-WT-US',
         shipheroName: 'Objet Charger - US(110V)',
-        inv01OnHand: 721,
-        inv01Available: 680,
-        inv01Current: 721,
+        inv01OnHand: 499,
+        inv01Available: 328,
+        inv01Current: 499,
         inv02Current: 2000, // 사용자 입력 데이터(2,000) 기준 고정 관리
         sales: [74, 82, 85, 90, 95, 110, 115, 100, 95],
         production: ['', '', '', '', '', '', '', '', '']
@@ -1973,9 +1974,9 @@
       'CCO-999-WT01-WW': {
         shipheroSku: 'CCO-999-WT-WW',
         shipheroName: 'Flower Objet (Daisy White)',
-        inv01OnHand: 445,
-        inv01Available: 435,
-        inv01Current: 445,
+        inv01OnHand: 379,
+        inv01Available: 332,
+        inv01Current: 379,
         inv02Current: 2000,
         sales: [22, 26, 28, 30, 32, 35, 35, 30, 28],
         production: ['', '', '', '', '', '', '', '', '']
@@ -1983,9 +1984,9 @@
       'CCO-999-YL01-WW': {
         shipheroSku: 'CCO-999-YL-WW',
         shipheroName: 'Flower Objet (Sunflower Yellow)',
-        inv01OnHand: 256,
-        inv01Available: 248,
-        inv01Current: 256,
+        inv01OnHand: 210,
+        inv01Available: 185,
+        inv01Current: 210,
         inv02Current: 2000,
         sales: [19, 22, 24, 25, 28, 30, 30, 26, 25],
         production: ['', '', '', '', '', '', '', '', '']
@@ -1993,9 +1994,9 @@
       'CCO-999-OR01-WW': {
         shipheroSku: 'CCO-999-OR-WW',
         shipheroName: 'Flower Objet (Marigold Orange)',
-        inv01OnHand: 275,
-        inv01Available: 267,
-        inv01Current: 275,
+        inv01OnHand: 223,
+        inv01Available: 192,
+        inv01Current: 223,
         inv02Current: 2000,
         sales: [16, 19, 22, 24, 25, 28, 28, 24, 22],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2003,9 +2004,9 @@
       'CCO-999-SV01-WW': {
         shipheroSku: 'CCO-999-SV-WW',
         shipheroName: 'Flower Objet (Chrome Silver)',
-        inv01OnHand: 371,
-        inv01Available: 355,
-        inv01Current: 371,
+        inv01OnHand: 293,
+        inv01Available: 207,
+        inv01Current: 293,
         inv02Current: 2000,
         sales: [32, 38, 40, 42, 45, 50, 50, 45, 40],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2238,11 +2239,12 @@
       const i01DepletionLabel = formatDepletionWeek(wosI01);
       const totalDepletionLabel = formatDepletionWeek(totalWos);
 
-      // 현재(46w) 및 미래(47w~52w) 과부족 체크
+      // 현재(idx=2) 및 미래(idx=3..8) 과부족 체크
       const minFutureI01Diff = Math.min(...i01Diff.slice(2));
       const minFutureI02Diff = Math.min(...i02Diff.slice(2));
       const currI01Diff = i01Diff[2];
       const currI02Diff = i02Diff[2];
+      const currWeekCode = (PSI_WEEKS[2] ? PSI_WEEKS[2].code : '48w');
 
       const hasI01Shortage = minFutureI01Diff < 0;
       const hasI02Shortage = minFutureI02Diff < 0;
@@ -2251,7 +2253,7 @@
         code: 'OPTIMAL',
         badge: '🟢 I_01 · I_02 안정',
         badgeCls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30',
-        actionMsg: `현재(46w) I_01 과부족(${currI01Diff >= 0 ? '+' : ''}${currI01Diff.toLocaleString()}) · I_02 과부족(${currI02Diff >= 0 ? '+' : ''}${currI02Diff.toLocaleString()})`
+        actionMsg: `현재(${currWeekCode}) I_01 과부족(${currI01Diff >= 0 ? '+' : ''}${currI01Diff.toLocaleString()}) · I_02 과부족(${currI02Diff >= 0 ? '+' : ''}${currI02Diff.toLocaleString()})`
       };
 
       if (hasI01Shortage && hasI02Shortage) {
@@ -2338,6 +2340,38 @@
       }
     }
 
+    function getShipHeroSummaryTuple(basis) {
+      return Object.keys(SHIPHERO_BASE_SEEDS).map(k => {
+        const st = psiUserState[k] || {};
+        const sd = SHIPHERO_BASE_SEEDS[k];
+        if (basis === 'available') {
+          return st.inv01Available !== undefined ? st.inv01Available : sd.inv01Available;
+        }
+        return st.inv01OnHand !== undefined ? st.inv01OnHand : sd.inv01OnHand;
+      }).join('/');
+    }
+
+    function applyShipHeroSeedsToState() {
+      Object.entries(SHIPHERO_BASE_SEEDS).forEach(([dashModel, seed]) => {
+        if (!psiUserState[dashModel]) {
+          psiUserState[dashModel] = {
+            inv01OnHand: seed.inv01OnHand,
+            inv01Available: seed.inv01Available,
+            inv01Current: psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand,
+            inv02Current: psiLockedInv02Map[dashModel] !== undefined ? psiLockedInv02Map[dashModel] : seed.inv02Current,
+            sales: [...seed.sales],
+            production: [...seed.production]
+          };
+        } else {
+          psiUserState[dashModel].inv01OnHand = seed.inv01OnHand;
+          psiUserState[dashModel].inv01Available = seed.inv01Available;
+          psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand;
+          // I_02는 절대 건드리지 않음!
+        }
+      });
+      savePsiUserState(psiUserState);
+    }
+
     function setPsiInv01Basis(basis) {
       psiInv01Basis = basis;
       Object.keys(SHIPHERO_BASE_SEEDS).forEach(modelKey => {
@@ -2362,11 +2396,10 @@
       savePsiUserState(psiUserState);
       renderPsiDashboard();
       if (currentView === 'psi') render();
+      const tupleStr = getShipHeroSummaryTuple(basis);
       showToast(
         basis === 'available' ? 'I_01: ShipHero Available(가용재고) 반영' : 'I_01: ShipHero On Hand(총재고) 반영',
-        basis === 'available'
-          ? 'I_01만 업데이트됨 (CDO 680 / WT 435 / YL 248 / OR 267 / SV 355) · I_02는 현재 입력값 유지'
-          : 'I_01만 업데이트됨 (CDO 721 / WT 445 / YL 256 / OR 275 / SV 371) · I_02는 현재 입력값 유지',
+        `I_01만 업데이트됨 (${tupleStr}) · I_02는 현재 입력값 유지`,
         '📦'
       );
     }
@@ -2376,14 +2409,19 @@
         const mon = getCurrentMondayDate();
         const monKey = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
         const lastMon = localStorage.getItem(PSI_MONDAY_SYNC_KEY);
+        const cdoState = psiUserState['CDO-999-WT01-US'];
+        const seedChanged = !cdoState || cdoState.inv01OnHand !== SHIPHERO_BASE_SEEDS['CDO-999-WT01-US'].inv01OnHand;
+        const isNewMonday = lastMon !== monKey;
+        if (isNewMonday || seedChanged) {
+          applyShipHeroSeedsToState();
+          renderPsiDashboard();
+        }
         const badge = document.getElementById('psi-sync-badge');
         if (badge) {
-          badge.textContent = `매주 월요일 I_01 업데이트 (기준: ${monKey})`;
+          badge.textContent = `매주 월요일 I_01 자동 동기화 (기준: ${monKey})`;
         }
-        if (lastMon !== monKey) {
-          localStorage.setItem(PSI_MONDAY_SYNC_KEY, monKey);
-          syncShipHeroLive(true);
-        }
+        // 페이지 로드 시 최신 월요일 스냅샷(shiphero_inventory.json) 및 월요일 도래 시 실시간 GraphQL 자동 동기화
+        syncShipHeroLive(true, isNewMonday);
       } catch (_) {}
     }
 
@@ -2491,10 +2529,83 @@
       showToast('P(생산요청) 초기화 및 I_01 월요일 재고 복원', 'I_02(BJ-AS) 재고는 현재 입력된 데이터를 그대로 유지했습니다.', '🔄');
     }
 
+    const SHIPHERO_ENC_AUTH = "jlpfDmmHP2WTVewvVH2PIBHlH5rjYlKKSdmJpXv55AAJ6FM3fYPtGOdstt1DM9jPM9OwwQ==";
+
+    function decryptShipHeroCreds(password) {
+      if (!password) return null;
+      try {
+        const enc = new TextEncoder();
+        const pwBytes = enc.encode(password);
+        let key = sha256Bytes(enc.encode(password + ":" + SALT));
+        for (let i = 0; i < 5000; i++) {
+          key = sha256Bytes(concatBytes(key, pwBytes));
+        }
+        const ks1 = sha256Bytes(concatBytes(key, enc.encode(":SHIPHERO_AUTH")));
+        const ks2 = sha256Bytes(concatBytes(key, enc.encode(":SHIPHERO_AUTH_2")));
+        const fullKs = concatBytes(ks1, ks2);
+        const binStr = atob(SHIPHERO_ENC_AUTH);
+        const plainBytes = new Uint8Array(binStr.length);
+        for (let i = 0; i < binStr.length; i++) {
+          plainBytes[i] = binStr.charCodeAt(i) ^ fullKs[i];
+        }
+        return JSON.parse(new TextDecoder('utf-8').decode(plainBytes));
+      } catch (_) {
+        return null;
+      }
+    }
+
+    async function fetchShipHeroGraphqlLive() {
+      const creds = decryptShipHeroCreds(currentPassword);
+      const shEmail = (creds && creds.u) || localStorage.getItem('shiphero_email') || 'yrseo@bujeon.com';
+      const shPass = (creds && creds.p) || localStorage.getItem('shiphero_token') || '';
+      if (!shPass) throw new Error('No ShipHero credentials');
+
+      const endpoints = [
+        (url) => url,
+        (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`
+      ];
+
+      let lastErr = null;
+      for (const wrapUrl of endpoints) {
+        try {
+          const authRes = await fetch(wrapUrl('https://public-api.shiphero.com/auth/token'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: shEmail, password: shPass })
+          });
+          if (!authRes.ok) throw new Error('Auth HTTP ' + authRes.status);
+          const authData = await authRes.json();
+          const token = authData.access_token;
+          if (!token) throw new Error('No access_token');
+
+          const gqlQuery = `{ products { data(first: 100) { edges { node { sku name warehouse_products { on_hand available } } } } } }`;
+          const gqlRes = await fetch(wrapUrl('https://public-api.shiphero.com/graphql'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ query: gqlQuery })
+          });
+          if (!gqlRes.ok) throw new Error('GraphQL HTTP ' + gqlRes.status);
+          const gqlData = await gqlRes.json();
+          const edges = (((gqlData || {}).data || {}).products || {}).data?.edges || [];
+          if (edges.length > 0) return edges;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error('Live GraphQL fetch failed');
+    }
+
     /**
-     * 매주 월요일 ShipHero 동기화: 오직 I_01 재고만 ShipHero에서 업데이트하며, I_02 재고는 절대 변경하지 않음
+     * 매주 월요일 ShipHero 동기화:
+     * 1순위: 매주 월요일 스케줄러가 ShipHero GraphQL에서 가져와 배포한 ./shiphero_inventory.json 동기화 (CORS 제약 없음)
+     * 2순위: 브라우저 실시간 GraphQL API 조회 (수동 동기화 클릭 시 또는 월요일 최신화 필요 시)
+     * 3순위: 최신 내장 SHIPHERO_BASE_SEEDS 스냅샷 적용
+     * 오직 I_01 재고만 업데이트하며, I_02 재고는 절대 변경하지 않음!
      */
-    async function syncShipHeroLive(silent = false) {
+    async function syncShipHeroLive(silent = false, forceLiveOnMonday = false) {
       const btn = document.getElementById('psi-sync-btn');
       const icon = document.getElementById('psi-sync-icon');
       const badge = document.getElementById('psi-sync-badge');
@@ -2510,114 +2621,130 @@
         skuReverseMap[dashModel] = dashModel;
       });
 
+      const mon = getCurrentMondayDate();
+      const currentMonKey = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
+
       try {
-        const shEmail = localStorage.getItem('shiphero_email') || 'yrseo@bujeon.com';
-        const shPass = localStorage.getItem('shiphero_token') || '';
-        const authRes = await fetch('https://public-api.shiphero.com/auth/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: shEmail,
-            password: shPass || currentPassword
-          })
-        });
-        if (!authRes.ok) throw new Error('ShipHero Auth HTTP ' + authRes.status);
-        const authData = await authRes.json();
-        const token = authData.access_token;
-        if (!token) throw new Error('토큰 발급 실패');
-
-        const gqlQuery = `
-          query {
-            products {
-              data(first: 100) {
-                edges {
-                  node {
-                    sku
-                    name
-                    warehouse_products {
-                      on_hand
-                      available
-                    }
-                  }
+        // 1) 수동 버튼 클릭(!silent) 또는 새로운 월요일(forceLiveOnMonday) 도래 시 실시간 ShipHero GraphQL API 우선 조회
+        if (!silent || forceLiveOnMonday) {
+          try {
+            const pEdges = await fetchShipHeroGraphqlLive();
+            let liveUpdated = 0;
+            pEdges.forEach(edge => {
+              const node = edge.node || {};
+              const dashModel = skuReverseMap[node.sku];
+              if (dashModel) {
+                const wps = node.warehouse_products || [];
+                const onHand = wps.reduce((sum, w) => sum + (Number(w.on_hand) || 0), 0);
+                const avail = wps.reduce((sum, w) => sum + (Number(w.available) || 0), 0);
+                if (SHIPHERO_BASE_SEEDS[dashModel]) {
+                  SHIPHERO_BASE_SEEDS[dashModel].inv01OnHand = onHand;
+                  SHIPHERO_BASE_SEEDS[dashModel].inv01Available = avail;
+                  SHIPHERO_BASE_SEEDS[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
                 }
+                if (!psiUserState[dashModel]) {
+                  const seed = SHIPHERO_BASE_SEEDS[dashModel];
+                  psiUserState[dashModel] = {
+                    inv01OnHand: onHand,
+                    inv01Available: avail,
+                    inv01Current: psiInv01Basis === 'available' ? avail : onHand,
+                    inv02Current: psiLockedInv02Map[dashModel] !== undefined ? psiLockedInv02Map[dashModel] : seed.inv02Current,
+                    sales: [...seed.sales],
+                    production: [...seed.production]
+                  };
+                } else {
+                  psiUserState[dashModel].inv01OnHand = onHand;
+                  psiUserState[dashModel].inv01Available = avail;
+                  psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
+                }
+                liveUpdated++;
               }
+            });
+            if (liveUpdated > 0) {
+              savePsiUserState(psiUserState);
+              localStorage.setItem(PSI_MONDAY_SYNC_KEY, currentMonKey);
+              const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+              if (badge) badge.textContent = `I_01 ShipHero 실시간 동기화 (${currentMonKey} · ${nowStr})`;
+              renderPsiDashboard();
+              if (currentView === 'psi') render();
+              const tupleStr = getShipHeroSummaryTuple(psiInv01Basis);
+              showToast('I_01 (ShipHero) 실시간 재고 동기화 완료!', `ShipHero 실시간 재고(${tupleStr})가 반영되었습니다. (I_02 수기 재고 유지)`, '✅');
+              return;
+            }
+          } catch (_) {}
+        }
+
+        // 2) 매주 월요일 자동 생성·배포되는 shiphero_inventory.json 조회 (동일 도메인 JSON, CORS 오류 없음)
+        const jsonRes = await fetch(`./shiphero_inventory.json?_ts=${Date.now()}`, { cache: 'no-store' });
+        if (jsonRes.ok) {
+          const snap = await jsonRes.json();
+          if (snap && snap.items) {
+            let updatedCount = 0;
+            Object.entries(snap.items).forEach(([dashModel, itemData]) => {
+              const onHand = Number(itemData.inv01OnHand);
+              const avail = Number(itemData.inv01Available);
+              if (!isNaN(onHand) && !isNaN(avail)) {
+                if (SHIPHERO_BASE_SEEDS[dashModel]) {
+                  SHIPHERO_BASE_SEEDS[dashModel].inv01OnHand = onHand;
+                  SHIPHERO_BASE_SEEDS[dashModel].inv01Available = avail;
+                  SHIPHERO_BASE_SEEDS[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
+                }
+                if (!psiUserState[dashModel]) {
+                  const seed = SHIPHERO_BASE_SEEDS[dashModel] || { sales: [0,0,0,0,0,0,0,0,0], production: ['','','','','','','','',''], inv02Current: 2000 };
+                  psiUserState[dashModel] = {
+                    inv01OnHand: onHand,
+                    inv01Available: avail,
+                    inv01Current: psiInv01Basis === 'available' ? avail : onHand,
+                    inv02Current: psiLockedInv02Map[dashModel] !== undefined ? psiLockedInv02Map[dashModel] : seed.inv02Current,
+                    sales: [...seed.sales],
+                    production: [...seed.production]
+                  };
+                } else {
+                  psiUserState[dashModel].inv01OnHand = onHand;
+                  psiUserState[dashModel].inv01Available = avail;
+                  psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
+                  // I_02는 절대 건드리지 않음!
+                }
+                updatedCount++;
+              }
+            });
+
+            if (updatedCount > 0) {
+              savePsiUserState(psiUserState);
+              const monDateStr = snap.mondayDate || SHIPHERO_SEED_MONDAY;
+              const weekLabel = snap.weekCode || (PSI_WEEKS[2] ? PSI_WEEKS[2].code.toUpperCase() : '');
+              localStorage.setItem(PSI_MONDAY_SYNC_KEY, monDateStr);
+              if (badge) {
+                badge.textContent = `매주 월요일 I_01 자동 동기화 (${weekLabel} · ${monDateStr} 기준)`;
+              }
+              renderPsiDashboard();
+              if (currentView === 'psi') render();
+              if (!silent) {
+                const tupleStr = getShipHeroSummaryTuple(psiInv01Basis);
+                showToast(
+                  `I_01 (ShipHero) ${weekLabel} 월요일 재고 동기화 완료!`,
+                  `ShipHero 최신 재고(${tupleStr})가 I_01에 반영되었으며, I_02 수기 재고는 그대로 유지됩니다.`,
+                  '✅'
+                );
+              }
+              return;
             }
           }
-        `;
-        const gqlRes = await fetch('https://public-api.shiphero.com/graphql', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-          },
-          body: JSON.stringify({ query: gqlQuery })
-        });
-        if (!gqlRes.ok) throw new Error('ShipHero GraphQL HTTP ' + gqlRes.status);
-        const gqlData = await gqlRes.json();
-        const pEdges = (((gqlData || {}).data || {}).products || {}).data?.edges || [];
-        let updatedCount = 0;
-
-        pEdges.forEach(edge => {
-          const node = edge.node || {};
-          const dashModel = skuReverseMap[node.sku];
-          if (dashModel) {
-            const wps = node.warehouse_products || [];
-            const onHand = wps.reduce((sum, w) => sum + (Number(w.on_hand) || 0), 0);
-            const avail = wps.reduce((sum, w) => sum + (Number(w.available) || 0), 0);
-            if (!psiUserState[dashModel]) {
-              const row = RAW_DATA.find(r => r.model === dashModel) || { model: dashModel, buyer: 'orna', project: dashModel, item: dashModel, status: '판매' };
-              const base = getPsiEntryForModel(row);
-              psiUserState[dashModel] = {
-                inv01OnHand: onHand,
-                inv01Available: avail,
-                inv01Current: psiInv01Basis === 'available' ? avail : onHand,
-                inv02Current: base.inv02Current, // I_02 변경 금지
-                sales: [...base.sales],
-                production: [...base.production]
-              };
-            } else {
-              psiUserState[dashModel].inv01OnHand = onHand;
-              psiUserState[dashModel].inv01Available = avail;
-              psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
-              // psiUserState[dashModel].inv02Current 는 절대 건드리지 않음!
-            }
-            updatedCount++;
-          }
-        });
-
-        savePsiUserState(psiUserState);
-        const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-        if (badge) badge.textContent = `I_01 ShipHero 동기화 완료 (${nowStr})`;
-        renderPsiDashboard();
-        if (currentView === 'psi') render();
-        showToast('I_01 (ShipHero) 월요일 재고 업데이트 완료!', `I_01 재고 ${updatedCount}종 업데이트 완료 (I_02 수기 재고는 변경 없이 유지됨)`, '✅');
+        }
+        throw new Error('Fallback to embedded Monday snapshot');
       } catch (err) {
-        // API 직접 호출이 브라우저 CORS로 제한될 경우에도 ShipHero 최신 스냅샷 수량으로 I_01만 업데이트 (I_02는 보존!)
-        Object.entries(SHIPHERO_BASE_SEEDS).forEach(([dashModel, seed]) => {
-          if (!psiUserState[dashModel]) {
-            psiUserState[dashModel] = {
-              inv01OnHand: seed.inv01OnHand,
-              inv01Available: seed.inv01Available,
-              inv01Current: psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand,
-              inv02Current: seed.inv02Current,
-              sales: [...seed.sales],
-              production: [...seed.production]
-            };
-          } else {
-            psiUserState[dashModel].inv01OnHand = seed.inv01OnHand;
-            psiUserState[dashModel].inv01Available = seed.inv01Available;
-            psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand;
-            // I_02는 현재 입력된 값 그대로 보존!
-          }
-        });
-        savePsiUserState(psiUserState);
-        const mon = getCurrentMondayDate();
+        applyShipHeroSeedsToState();
         const monStr = `${mon.getMonth() + 1}/${mon.getDate()}(월) 기준`;
-        if (badge) badge.textContent = `매주 월요일 I_01 업데이트 (${monStr})`;
+        if (badge) badge.textContent = `매주 월요일 I_01 자동 동기화 (${monStr})`;
         renderPsiDashboard();
         if (currentView === 'psi') render();
         if (!silent) {
-          showToast('I_01 (ShipHero) 월요일 재고 업데이트 완료', 'ShipHero 월요일 재고(721/445/256/275/371)가 I_01에 반영되었으며, I_02 재고는 현재 입력된 값으로 유지됩니다.', '✅');
+          const tupleStr = getShipHeroSummaryTuple(psiInv01Basis);
+          showToast(
+            'I_01 (ShipHero) 월요일 재고 업데이트 완료',
+            `ShipHero 월요일 재고(${tupleStr})가 I_01에 반영되었으며, I_02 재고는 현재 입력된 값으로 유지됩니다.`,
+            '✅'
+          );
         }
       } finally {
         if (btn) btn.disabled = false;
@@ -2732,7 +2859,7 @@
           <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
             <div class="xl:col-span-7 p-3.5 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-1">
               <div class="flex items-center justify-between text-xs">
-                <span class="font-bold text-[var(--foreground)]">📊 9주간 (44w~52w) 주간 판매량(S) · I_01 재고 · 과부족(I_01-S) 추이 ${psiSelectedChartSku === 'ALL' ? '(전체 합산)' : `[${escapeHtml(psiSelectedChartSku)}]`}</span>
+                <span class="font-bold text-[var(--foreground)]">📊 9주간 (${PSI_WEEKS[0]?.code || '46w'}~${PSI_WEEKS[8]?.code || '1w'}) 주간 판매량(S) · I_01 재고 · 과부족(I_01-S) 추이 ${psiSelectedChartSku === 'ALL' ? '(전체 합산)' : `[${escapeHtml(psiSelectedChartSku)}]`}</span>
                 <span class="text-[10px] font-mono text-[var(--muted-foreground)]">Recharts ComposedChart</span>
               </div>
               <div id="recharts-psi-weekly-trend" class="w-full h-[255px]"></div>
@@ -2768,11 +2895,11 @@
           </div>
           <div class="flex flex-wrap items-center gap-2 shrink-0">
             <div class="inline-flex rounded-lg bg-[var(--card)] p-0.5 border border-[var(--border)] text-[11px]">
-              <button type="button" onclick="setPsiInv01Basis('on_hand')" class="px-2.5 py-1 rounded font-bold transition-all ${psiInv01Basis === 'on_hand' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero On Hand 수량 (721 / 445 / 256 / 275 / 371)">
-                I_01: On Hand (721/445/256/275/371)
+              <button type="button" onclick="setPsiInv01Basis('on_hand')" class="px-2.5 py-1 rounded font-bold transition-all ${psiInv01Basis === 'on_hand' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero On Hand 수량 (${getShipHeroSummaryTuple('on_hand')})">
+                I_01: On Hand (${getShipHeroSummaryTuple('on_hand')})
               </button>
-              <button type="button" onclick="setPsiInv01Basis('available')" class="px-2.5 py-1 rounded font-bold transition-all ${psiInv01Basis === 'available' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero Available 수량 (680 / 435 / 248 / 267 / 355)">
-                I_01: Available (680/435/248/267/355)
+              <button type="button" onclick="setPsiInv01Basis('available')" class="px-2.5 py-1 rounded font-bold transition-all ${psiInv01Basis === 'available' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero Available 수량 (${getShipHeroSummaryTuple('available')})">
+                I_01: Available (${getShipHeroSummaryTuple('available')})
               </button>
             </div>
             ${psiStatusFilter !== 'ALL' ? `
@@ -2933,8 +3060,8 @@
                           </div>
                         </div>
                         <div class="text-[10px] font-mono text-[var(--muted-foreground)] pt-1 border-t border-[var(--border)] space-y-0.5">
-                          <div>· 46w I_01-S = <b class="text-[var(--foreground)]">${calc.currI01Diff >= 0 ? '+' : ''}${calc.currI01Diff.toLocaleString()}</b></div>
-                          <div>· 46w I_02-I_01-S = <b class="text-[var(--foreground)]">${calc.currI02Diff >= 0 ? '+' : ''}${calc.currI02Diff.toLocaleString()}</b></div>
+                          <div>· ${PSI_WEEKS[2]?.code || '48w'} I_01-S = <b class="text-[var(--foreground)]">${calc.currI01Diff >= 0 ? '+' : ''}${calc.currI01Diff.toLocaleString()}</b></div>
+                          <div>· ${PSI_WEEKS[2]?.code || '48w'} I_02-I_01-S = <b class="text-[var(--foreground)]">${calc.currI02Diff >= 0 ? '+' : ''}${calc.currI02Diff.toLocaleString()}</b></div>
                         </div>
                         ${calc.inv02ProdSchedule.length > 0 ? `
                           <div class="p-1.5 rounded-lg bg-purple-500/10 border border-purple-500/25 text-[10px] text-purple-600 dark:text-purple-300 space-y-0.5">

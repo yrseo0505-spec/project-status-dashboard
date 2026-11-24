@@ -2047,13 +2047,14 @@
     // ShipHero 단품 5종 기준 데이터
     // - I_01: ShipHero 월요일 아침 재고 (On Hand: 721 / 445 / 256 / 275 / 371, Available: 680 / 435 / 248 / 267 / 355)
     // - I_02: 사용자가 업데이트한 2,000개를 기본값으로 고정 관리 (절대 자동 변경하지 않음)
+    const SHIPHERO_SEED_MONDAY = '2026-11-23';
     const SHIPHERO_BASE_SEEDS = {
       'CDO-999-WT01-US': {
         shipheroSku: 'CDO-999-WT-US',
         shipheroName: 'Objet Charger - US(110V)',
-        inv01OnHand: 721,
-        inv01Available: 680,
-        inv01Current: 721,
+        inv01OnHand: 499,
+        inv01Available: 328,
+        inv01Current: 499,
         inv02Current: 2000, // 사용자 입력 데이터(2,000) 기준 고정 관리
         sales: [74, 82, 85, 90, 95, 110, 115, 100, 95],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2061,9 +2062,9 @@
       'CCO-999-WT01-WW': {
         shipheroSku: 'CCO-999-WT-WW',
         shipheroName: 'Flower Objet (Daisy White)',
-        inv01OnHand: 445,
-        inv01Available: 435,
-        inv01Current: 445,
+        inv01OnHand: 379,
+        inv01Available: 332,
+        inv01Current: 379,
         inv02Current: 2000,
         sales: [22, 26, 28, 30, 32, 35, 35, 30, 28],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2071,9 +2072,9 @@
       'CCO-999-YL01-WW': {
         shipheroSku: 'CCO-999-YL-WW',
         shipheroName: 'Flower Objet (Sunflower Yellow)',
-        inv01OnHand: 256,
-        inv01Available: 248,
-        inv01Current: 256,
+        inv01OnHand: 210,
+        inv01Available: 185,
+        inv01Current: 210,
         inv02Current: 2000,
         sales: [19, 22, 24, 25, 28, 30, 30, 26, 25],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2081,9 +2082,9 @@
       'CCO-999-OR01-WW': {
         shipheroSku: 'CCO-999-OR-WW',
         shipheroName: 'Flower Objet (Marigold Orange)',
-        inv01OnHand: 275,
-        inv01Available: 267,
-        inv01Current: 275,
+        inv01OnHand: 223,
+        inv01Available: 192,
+        inv01Current: 223,
         inv02Current: 2000,
         sales: [16, 19, 22, 24, 25, 28, 28, 24, 22],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2091,9 +2092,9 @@
       'CCO-999-SV01-WW': {
         shipheroSku: 'CCO-999-SV-WW',
         shipheroName: 'Flower Objet (Chrome Silver)',
-        inv01OnHand: 371,
-        inv01Available: 355,
-        inv01Current: 371,
+        inv01OnHand: 293,
+        inv01Available: 207,
+        inv01Current: 293,
         inv02Current: 2000,
         sales: [32, 38, 40, 42, 45, 50, 50, 45, 40],
         production: ['', '', '', '', '', '', '', '', '']
