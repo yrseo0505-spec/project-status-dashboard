@@ -1915,7 +1915,7 @@
     const PSI_MONDAY_SYNC_KEY = 'diofit_psi_last_monday_sync';
     let psiScope = 'shiphero'; // 'shiphero' | 'all'
     let psiStatusFilter = 'ALL'; // 'ALL' | 'I01_SHORT' | 'I02_SHORT' | 'OPTIMAL'
-    let psiInv01Basis = 'on_hand'; // 'on_hand' (721/256/445/371/275) | 'available' (680/248/435/355/267)
+    let psiInv01Basis = 'available'; // Available(가용재고) 기준 고정 (328/332/185/192/207)
 
     // 매주 월요일 기준 동적 9주 타임라인 생성 (과거 2주 + 현재 + 미래 6주)
     function getIsoWeekNum(d) {
@@ -1966,7 +1966,7 @@
         shipheroName: 'Objet Charger - US(110V)',
         inv01OnHand: 499,
         inv01Available: 328,
-        inv01Current: 499,
+        inv01Current: 328,
         inv02Current: 2000, // 사용자 입력 데이터(2,000) 기준 고정 관리
         sales: [74, 82, 85, 90, 95, 110, 115, 100, 95],
         production: ['', '', '', '', '', '', '', '', '']
@@ -1976,7 +1976,7 @@
         shipheroName: 'Flower Objet (Daisy White)',
         inv01OnHand: 379,
         inv01Available: 332,
-        inv01Current: 379,
+        inv01Current: 332,
         inv02Current: 2000,
         sales: [22, 26, 28, 30, 32, 35, 35, 30, 28],
         production: ['', '', '', '', '', '', '', '', '']
@@ -1986,7 +1986,7 @@
         shipheroName: 'Flower Objet (Sunflower Yellow)',
         inv01OnHand: 210,
         inv01Available: 185,
-        inv01Current: 210,
+        inv01Current: 185,
         inv02Current: 2000,
         sales: [19, 22, 24, 25, 28, 30, 30, 26, 25],
         production: ['', '', '', '', '', '', '', '', '']
@@ -1996,7 +1996,7 @@
         shipheroName: 'Flower Objet (Marigold Orange)',
         inv01OnHand: 223,
         inv01Available: 192,
-        inv01Current: 223,
+        inv01Current: 192,
         inv02Current: 2000,
         sales: [16, 19, 22, 24, 25, 28, 28, 24, 22],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2006,7 +2006,7 @@
         shipheroName: 'Flower Objet (Chrome Silver)',
         inv01OnHand: 293,
         inv01Available: 207,
-        inv01Current: 293,
+        inv01Current: 207,
         inv02Current: 2000,
         sales: [32, 38, 40, 42, 45, 50, 50, 45, 40],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2097,9 +2097,7 @@
         production: ['', '', '', '', '', '', '', '', '']
       };
       const saved = psiUserState[modelKey] || {};
-      const defaultInv01 = psiInv01Basis === 'available'
-        ? (seed.inv01Available !== undefined ? seed.inv01Available : seed.inv01Current)
-        : (seed.inv01OnHand !== undefined ? seed.inv01OnHand : seed.inv01Current);
+      const availVal = saved.inv01Available !== undefined ? Number(saved.inv01Available) : (seed.inv01Available !== undefined ? seed.inv01Available : (seed.inv01Current || 0));
       return {
         model: modelKey,
         buyer: row.buyer,
@@ -2110,8 +2108,9 @@
         shipheroSku: saved.shipheroSku || seed.shipheroSku,
         shipheroName: saved.shipheroName || seed.shipheroName,
         inv01OnHand: saved.inv01OnHand !== undefined ? Number(saved.inv01OnHand) : (seed.inv01OnHand || seed.inv01Current || 0),
-        inv01Available: saved.inv01Available !== undefined ? Number(saved.inv01Available) : (seed.inv01Available || seed.inv01Current || 0),
-        inv01Current: saved.inv01Current !== undefined ? Number(saved.inv01Current) : defaultInv01,
+        inv01Available: availVal,
+        // I_01은 Available(가용재고)을 고정값으로 사용
+        inv01Current: availVal,
         // I_02는 오직 사용자 전용 수기 저장소(psiLockedInv02Map)의 값만 사용 (시스템 자동 변경 절대 금지)
         inv02Current: psiLockedInv02Map[modelKey] !== undefined ? Number(psiLockedInv02Map[modelKey]) : seed.inv02Current,
         sales: Array.isArray(saved.sales) && saved.sales.length === 9 ? saved.sales.map(Number) : [...seed.sales],
@@ -2352,12 +2351,13 @@
     }
 
     function applyShipHeroSeedsToState() {
+      psiInv01Basis = 'available';
       Object.entries(SHIPHERO_BASE_SEEDS).forEach(([dashModel, seed]) => {
         if (!psiUserState[dashModel]) {
           psiUserState[dashModel] = {
             inv01OnHand: seed.inv01OnHand,
             inv01Available: seed.inv01Available,
-            inv01Current: psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand,
+            inv01Current: seed.inv01Available,
             inv02Current: psiLockedInv02Map[dashModel] !== undefined ? psiLockedInv02Map[dashModel] : seed.inv02Current,
             sales: [...seed.sales],
             production: [...seed.production]
@@ -2365,15 +2365,16 @@
         } else {
           psiUserState[dashModel].inv01OnHand = seed.inv01OnHand;
           psiUserState[dashModel].inv01Available = seed.inv01Available;
-          psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand;
+          psiUserState[dashModel].inv01Current = seed.inv01Available;
           // I_02는 절대 건드리지 않음!
         }
       });
       savePsiUserState(psiUserState);
     }
 
-    function setPsiInv01Basis(basis) {
-      psiInv01Basis = basis;
+    function setPsiInv01Basis() {
+      // Available 고정 설정
+      psiInv01Basis = 'available';
       Object.keys(SHIPHERO_BASE_SEEDS).forEach(modelKey => {
         const seed = SHIPHERO_BASE_SEEDS[modelKey];
         if (!psiUserState[modelKey]) {
@@ -2382,35 +2383,37 @@
           psiUserState[modelKey] = {
             inv01OnHand: base.inv01OnHand,
             inv01Available: base.inv01Available,
-            inv01Current: basis === 'available' ? base.inv01Available : base.inv01OnHand,
+            inv01Current: base.inv01Available,
             inv02Current: base.inv02Current, // I_02는 절대 변경하지 않음
             sales: [...base.sales],
             production: [...base.production]
           };
         } else {
-          const onHand = psiUserState[modelKey].inv01OnHand !== undefined ? psiUserState[modelKey].inv01OnHand : seed.inv01OnHand;
           const avail = psiUserState[modelKey].inv01Available !== undefined ? psiUserState[modelKey].inv01Available : seed.inv01Available;
-          psiUserState[modelKey].inv01Current = basis === 'available' ? avail : onHand;
+          psiUserState[modelKey].inv01Current = avail;
         }
       });
       savePsiUserState(psiUserState);
       renderPsiDashboard();
       if (currentView === 'psi') render();
-      const tupleStr = getShipHeroSummaryTuple(basis);
+      const tupleStr = getShipHeroSummaryTuple('available');
       showToast(
-        basis === 'available' ? 'I_01: ShipHero Available(가용재고) 반영' : 'I_01: ShipHero On Hand(총재고) 반영',
-        `I_01만 업데이트됨 (${tupleStr}) · I_02는 현재 입력값 유지`,
+        'I_01: ShipHero Available(가용재고) 고정 반영',
+        `I_01은 Available 기준(${tupleStr})으로 고정 반영되며, I_02는 현재 입력값으로 유지됩니다.`,
         '📦'
       );
     }
 
     function checkMondayAutoUpdate() {
       try {
+        psiInv01Basis = 'available';
         const mon = getCurrentMondayDate();
         const monKey = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
         const lastMon = localStorage.getItem(PSI_MONDAY_SYNC_KEY);
         const cdoState = psiUserState['CDO-999-WT01-US'];
-        const seedChanged = !cdoState || cdoState.inv01OnHand !== SHIPHERO_BASE_SEEDS['CDO-999-WT01-US'].inv01OnHand;
+        const seedChanged = !cdoState ||
+          cdoState.inv01Available !== SHIPHERO_BASE_SEEDS['CDO-999-WT01-US'].inv01Available ||
+          cdoState.inv01Current !== SHIPHERO_BASE_SEEDS['CDO-999-WT01-US'].inv01Available;
         const isNewMonday = lastMon !== monKey;
         if (isNewMonday || seedChanged) {
           applyShipHeroSeedsToState();
@@ -2418,7 +2421,7 @@
         }
         const badge = document.getElementById('psi-sync-badge');
         if (badge) {
-          badge.textContent = `매주 월요일 I_01 자동 동기화 (기준: ${monKey})`;
+          badge.textContent = `매주 월요일 I_01(Available) 자동 동기화 (기준: ${monKey})`;
         }
         // 페이지 로드 시 최신 월요일 스냅샷(shiphero_inventory.json) 및 월요일 도래 시 실시간 GraphQL 자동 동기화
         syncShipHeroLive(true, isNewMonday);
@@ -2509,6 +2512,7 @@
      * 초기화 버튼 클릭 시에도 사용자가 입력한 I_02 재고는 절대 건드리지 않고 P(생산요청) 등만 초기화
      */
     function resetPsiOverrides() {
+      psiInv01Basis = 'available';
       Object.keys(SHIPHERO_BASE_SEEDS).forEach(modelKey => {
         const seed = SHIPHERO_BASE_SEEDS[modelKey];
         const preservedInv02 = (psiUserState[modelKey] && psiUserState[modelKey].inv02Current !== undefined)
@@ -2517,7 +2521,7 @@
         psiUserState[modelKey] = {
           inv01OnHand: seed.inv01OnHand,
           inv01Available: seed.inv01Available,
-          inv01Current: psiInv01Basis === 'available' ? seed.inv01Available : seed.inv01OnHand,
+          inv01Current: seed.inv01Available,
           inv02Current: preservedInv02, // I_02 변경 금지!
           sales: [...seed.sales],
           production: ['', '', '', '', '', '', '', '', '']
@@ -2526,7 +2530,7 @@
       savePsiUserState(psiUserState);
       renderPsiDashboard();
       if (currentView === 'psi') render();
-      showToast('P(생산요청) 초기화 및 I_01 월요일 재고 복원', 'I_02(BJ-AS) 재고는 현재 입력된 데이터를 그대로 유지했습니다.', '🔄');
+      showToast('P(생산요청) 초기화 및 I_01(Available) 월요일 재고 복원', 'I_02(BJ-AS) 재고는 현재 입력된 데이터를 그대로 유지했습니다.', '🔄');
     }
 
     const SHIPHERO_ENC_AUTH = "jlpfDmmHP2WTVewvVH2PIBHlH5rjYlKKSdmJpXv55AAJ6FM3fYPtGOdstt1DM9jPM9OwwQ==";
@@ -2640,14 +2644,14 @@
                 if (SHIPHERO_BASE_SEEDS[dashModel]) {
                   SHIPHERO_BASE_SEEDS[dashModel].inv01OnHand = onHand;
                   SHIPHERO_BASE_SEEDS[dashModel].inv01Available = avail;
-                  SHIPHERO_BASE_SEEDS[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
+                  SHIPHERO_BASE_SEEDS[dashModel].inv01Current = avail;
                 }
                 if (!psiUserState[dashModel]) {
                   const seed = SHIPHERO_BASE_SEEDS[dashModel];
                   psiUserState[dashModel] = {
                     inv01OnHand: onHand,
                     inv01Available: avail,
-                    inv01Current: psiInv01Basis === 'available' ? avail : onHand,
+                    inv01Current: avail,
                     inv02Current: psiLockedInv02Map[dashModel] !== undefined ? psiLockedInv02Map[dashModel] : seed.inv02Current,
                     sales: [...seed.sales],
                     production: [...seed.production]
@@ -2655,7 +2659,7 @@
                 } else {
                   psiUserState[dashModel].inv01OnHand = onHand;
                   psiUserState[dashModel].inv01Available = avail;
-                  psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
+                  psiUserState[dashModel].inv01Current = avail;
                 }
                 liveUpdated++;
               }
@@ -2664,11 +2668,11 @@
               savePsiUserState(psiUserState);
               localStorage.setItem(PSI_MONDAY_SYNC_KEY, currentMonKey);
               const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-              if (badge) badge.textContent = `I_01 ShipHero 실시간 동기화 (${currentMonKey} · ${nowStr})`;
+              if (badge) badge.textContent = `I_01(Available) 실시간 동기화 (${currentMonKey} · ${nowStr})`;
               renderPsiDashboard();
               if (currentView === 'psi') render();
-              const tupleStr = getShipHeroSummaryTuple(psiInv01Basis);
-              showToast('I_01 (ShipHero) 실시간 재고 동기화 완료!', `ShipHero 실시간 재고(${tupleStr})가 반영되었습니다. (I_02 수기 재고 유지)`, '✅');
+              const tupleStr = getShipHeroSummaryTuple('available');
+              showToast('I_01 (ShipHero Available) 실시간 재고 동기화 완료!', `ShipHero Available 재고(${tupleStr})가 반영되었습니다. (I_02 수기 재고 유지)`, '✅');
               return;
             }
           } catch (_) {}
@@ -2687,14 +2691,14 @@
                 if (SHIPHERO_BASE_SEEDS[dashModel]) {
                   SHIPHERO_BASE_SEEDS[dashModel].inv01OnHand = onHand;
                   SHIPHERO_BASE_SEEDS[dashModel].inv01Available = avail;
-                  SHIPHERO_BASE_SEEDS[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
+                  SHIPHERO_BASE_SEEDS[dashModel].inv01Current = avail;
                 }
                 if (!psiUserState[dashModel]) {
                   const seed = SHIPHERO_BASE_SEEDS[dashModel] || { sales: [0,0,0,0,0,0,0,0,0], production: ['','','','','','','','',''], inv02Current: 2000 };
                   psiUserState[dashModel] = {
                     inv01OnHand: onHand,
                     inv01Available: avail,
-                    inv01Current: psiInv01Basis === 'available' ? avail : onHand,
+                    inv01Current: avail,
                     inv02Current: psiLockedInv02Map[dashModel] !== undefined ? psiLockedInv02Map[dashModel] : seed.inv02Current,
                     sales: [...seed.sales],
                     production: [...seed.production]
@@ -2702,7 +2706,7 @@
                 } else {
                   psiUserState[dashModel].inv01OnHand = onHand;
                   psiUserState[dashModel].inv01Available = avail;
-                  psiUserState[dashModel].inv01Current = psiInv01Basis === 'available' ? avail : onHand;
+                  psiUserState[dashModel].inv01Current = avail;
                   // I_02는 절대 건드리지 않음!
                 }
                 updatedCount++;
@@ -2715,15 +2719,15 @@
               const weekLabel = snap.weekCode || (PSI_WEEKS[2] ? PSI_WEEKS[2].code.toUpperCase() : '');
               localStorage.setItem(PSI_MONDAY_SYNC_KEY, monDateStr);
               if (badge) {
-                badge.textContent = `매주 월요일 I_01 자동 동기화 (${weekLabel} · ${monDateStr} 기준)`;
+                badge.textContent = `매주 월요일 I_01(Available) 자동 동기화 (${weekLabel} · ${monDateStr} 기준)`;
               }
               renderPsiDashboard();
               if (currentView === 'psi') render();
               if (!silent) {
-                const tupleStr = getShipHeroSummaryTuple(psiInv01Basis);
+                const tupleStr = getShipHeroSummaryTuple('available');
                 showToast(
-                  `I_01 (ShipHero) ${weekLabel} 월요일 재고 동기화 완료!`,
-                  `ShipHero 최신 재고(${tupleStr})가 I_01에 반영되었으며, I_02 수기 재고는 그대로 유지됩니다.`,
+                  `I_01 (ShipHero Available) ${weekLabel} 월요일 재고 동기화 완료!`,
+                  `ShipHero Available 재고(${tupleStr})가 I_01에 반영되었으며, I_02 수기 재고는 그대로 유지됩니다.`,
                   '✅'
                 );
               }
@@ -2735,14 +2739,14 @@
       } catch (err) {
         applyShipHeroSeedsToState();
         const monStr = `${mon.getMonth() + 1}/${mon.getDate()}(월) 기준`;
-        if (badge) badge.textContent = `매주 월요일 I_01 자동 동기화 (${monStr})`;
+        if (badge) badge.textContent = `매주 월요일 I_01(Available) 자동 동기화 (${monStr})`;
         renderPsiDashboard();
         if (currentView === 'psi') render();
         if (!silent) {
-          const tupleStr = getShipHeroSummaryTuple(psiInv01Basis);
+          const tupleStr = getShipHeroSummaryTuple('available');
           showToast(
-            'I_01 (ShipHero) 월요일 재고 업데이트 완료',
-            `ShipHero 월요일 재고(${tupleStr})가 I_01에 반영되었으며, I_02 재고는 현재 입력된 값으로 유지됩니다.`,
+            'I_01 (ShipHero Available) 월요일 재고 업데이트 완료',
+            `ShipHero Available 월요일 재고(${tupleStr})가 I_01에 반영되었으며, I_02 재고는 현재 입력된 값으로 유지됩니다.`,
             '✅'
           );
         }
@@ -2894,13 +2898,13 @@
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-2 shrink-0">
-            <div class="inline-flex rounded-lg bg-[var(--card)] p-0.5 border border-[var(--border)] text-[11px]">
-              <button type="button" onclick="setPsiInv01Basis('on_hand')" class="px-2.5 py-1 rounded font-bold transition-all ${psiInv01Basis === 'on_hand' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero On Hand 수량 (${getShipHeroSummaryTuple('on_hand')})">
-                I_01: On Hand (${getShipHeroSummaryTuple('on_hand')})
-              </button>
-              <button type="button" onclick="setPsiInv01Basis('available')" class="px-2.5 py-1 rounded font-bold transition-all ${psiInv01Basis === 'available' ? 'bg-blue-600 text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}" title="ShipHero Available 수량 (${getShipHeroSummaryTuple('available')})">
-                I_01: Available (${getShipHeroSummaryTuple('available')})
-              </button>
+            <div class="inline-flex items-center gap-1.5 rounded-lg bg-[var(--card)] px-3 py-1.5 border border-blue-500/40 text-[11px]">
+              <span class="px-2 py-0.5 rounded bg-blue-600 text-white font-bold" title="ShipHero Available(가용재고) 수량 고정 기준 (${getShipHeroSummaryTuple('available')})">
+                I_01: Available 고정 (${getShipHeroSummaryTuple('available')})
+              </span>
+              <span class="text-[10px] font-mono text-[var(--muted-foreground)]" title="참고용 ShipHero On Hand 수량 (${getShipHeroSummaryTuple('on_hand')})">
+                On Hand 참고: (${getShipHeroSummaryTuple('on_hand')})
+              </span>
             </div>
             ${psiStatusFilter !== 'ALL' ? `
               <button onclick="setPsiStatusFilter('ALL')" class="px-2.5 py-1 rounded-lg bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold hover:underline">

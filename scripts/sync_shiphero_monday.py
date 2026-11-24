@@ -136,7 +136,7 @@ def update_html_seeds(html_path, items, monday_str):
         )
         content = re.sub(
             pattern,
-            rf"\g<1>{oh}\g<2>{av}\g<3>{oh}",
+            rf"\g<1>{oh}\g<2>{av}\g<3>{av}",
             content,
             flags=re.DOTALL,
         )

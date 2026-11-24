@@ -2003,7 +2003,7 @@
     const PSI_MONDAY_SYNC_KEY = 'diofit_psi_last_monday_sync';
     let psiScope = 'shiphero'; // 'shiphero' | 'all'
     let psiStatusFilter = 'ALL'; // 'ALL' | 'I01_SHORT' | 'I02_SHORT' | 'OPTIMAL'
-    let psiInv01Basis = 'on_hand'; // 'on_hand' (721/256/445/371/275) | 'available' (680/248/435/355/267)
+    let psiInv01Basis = 'available'; // Available(가용재고) 기준 고정 (328/332/185/192/207)
 
     // 매주 월요일 기준 동적 9주 타임라인 생성 (과거 2주 + 현재 + 미래 6주)
     function getIsoWeekNum(d) {
@@ -2054,7 +2054,7 @@
         shipheroName: 'Objet Charger - US(110V)',
         inv01OnHand: 499,
         inv01Available: 328,
-        inv01Current: 499,
+        inv01Current: 328,
         inv02Current: 2000, // 사용자 입력 데이터(2,000) 기준 고정 관리
         sales: [74, 82, 85, 90, 95, 110, 115, 100, 95],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2064,7 +2064,7 @@
         shipheroName: 'Flower Objet (Daisy White)',
         inv01OnHand: 379,
         inv01Available: 332,
-        inv01Current: 379,
+        inv01Current: 332,
         inv02Current: 2000,
         sales: [22, 26, 28, 30, 32, 35, 35, 30, 28],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2074,7 +2074,7 @@
         shipheroName: 'Flower Objet (Sunflower Yellow)',
         inv01OnHand: 210,
         inv01Available: 185,
-        inv01Current: 210,
+        inv01Current: 185,
         inv02Current: 2000,
         sales: [19, 22, 24, 25, 28, 30, 30, 26, 25],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2084,7 +2084,7 @@
         shipheroName: 'Flower Objet (Marigold Orange)',
         inv01OnHand: 223,
         inv01Available: 192,
-        inv01Current: 223,
+        inv01Current: 192,
         inv02Current: 2000,
         sales: [16, 19, 22, 24, 25, 28, 28, 24, 22],
         production: ['', '', '', '', '', '', '', '', '']
@@ -2094,7 +2094,7 @@
         shipheroName: 'Flower Objet (Chrome Silver)',
         inv01OnHand: 293,
         inv01Available: 207,
-        inv01Current: 293,
+        inv01Current: 207,
         inv02Current: 2000,
         sales: [32, 38, 40, 42, 45, 50, 50, 45, 40],
         production: ['', '', '', '', '', '', '', '', '']
